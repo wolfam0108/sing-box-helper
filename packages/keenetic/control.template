@@ -7,7 +7,7 @@ Priority: optional
 Homepage: https://github.com/wolfram0108/sing-box-helper
 License: MIT
 Source: https://github.com/wolfram0108/sing-box-helper
-Depends: sing-box
+Depends: sing-box-go
 Description: Web UI and CLI to manage sing-box on Keenetic/Entware.
  Accepts a node URI (vless://, hysteria2://, socks5://, ...) and renders
  the corresponding /opt/etc/sing-box/config.json. Provides a 4-tab web
