@@ -27,12 +27,14 @@ import (
 
 func main() {
 	var (
-		serve   = flag.Bool("serve", false, "Run as HTTP server (otherwise process --from-uri and exit).")
-		listen  = flag.String("listen", "0.0.0.0:8765", "HTTP listen address used with --serve.")
-		fromURI = flag.String("from-uri", "", "Node URI (vless://, hysteria2://, hy2://). Required in CLI mode.")
-		apply   = flag.Bool("apply", false, "Write the rendered config to disk (otherwise prints to stdout).")
-		outPath = flag.String("out", "/opt/etc/sing-box/config.json",
+		serve        = flag.Bool("serve", false, "Run as HTTP server (otherwise process --from-uri and exit).")
+		listen       = flag.String("listen", "0.0.0.0:8765", "HTTP listen address used with --serve.")
+		fromURI      = flag.String("from-uri", "", "Node URI (vless://, hysteria2://, hy2://, socks5://). Required in CLI mode.")
+		apply        = flag.Bool("apply", false, "Write the rendered config to disk (otherwise prints to stdout).")
+		outPath      = flag.String("out", "/opt/etc/sing-box/config.json",
 			"Output path used together with --apply.")
+		settingsPath = flag.String("settings", "/opt/etc/singbox-helper/config.yaml",
+			"Path to YAML settings file. Missing file = built-in defaults.")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
@@ -45,8 +47,14 @@ func main() {
 	}
 	flag.Parse()
 
+	settings, err := config.LoadSettings(*settingsPath)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "warning: settings load:", err, "(using defaults)")
+		settings = config.DefaultSettings()
+	}
+
 	if *serve {
-		if err := runServer(*listen); err != nil {
+		if err := runServer(*listen, *settingsPath, settings); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -59,20 +67,22 @@ func main() {
 		os.Exit(2)
 	}
 
-	if err := run(*fromURI, *apply, *outPath); err != nil {
+	if err := run(*fromURI, *apply, *outPath, settings); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
 }
 
-func runServer(addr string) error {
-	srv := web.New(config.DefaultSettings())
+func runServer(addr, settingsPath string, s config.Settings) error {
+	srv := web.New(s)
+	srv.SettingsPath = settingsPath
 	fmt.Fprintln(os.Stderr, "singbox-helper HTTP API listening on", addr)
-	fmt.Fprintln(os.Stderr, "Endpoints: GET /api/status, POST /api/preview, POST /api/apply, GET /api/test")
+	fmt.Fprintln(os.Stderr, "Settings:", settingsPath)
+	fmt.Fprintln(os.Stderr, "Endpoints: GET /api/status, POST /api/preview, POST /api/apply, GET /api/test, GET|POST /api/settings")
 	return srv.ListenAndServe(addr)
 }
 
-func run(uri string, apply bool, outPath string) error {
+func run(uri string, apply bool, outPath string, settings config.Settings) error {
 	pn, err := parser.Parse(uri)
 	if err != nil {
 		return fmt.Errorf("parse URI: %w", err)
@@ -84,7 +94,7 @@ func run(uri string, apply bool, outPath string) error {
 		fmt.Fprintln(os.Stderr, "warning:", note)
 	}
 
-	rendered, err := config.Render(pn, config.DefaultSettings())
+	rendered, err := config.Render(pn, settings)
 	if err != nil {
 		return fmt.Errorf("render config: %w", err)
 	}

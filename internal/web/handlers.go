@@ -65,7 +65,7 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := statusResponse{
-		Status: probe.CollectStatus(s.Settings.TunInterfaceName),
+		Status: probe.CollectStatus(s.Settings().TunInterfaceName),
 	}
 
 	// Source of truth: read the actual sing-box config.json.
@@ -133,7 +133,7 @@ func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
 		errorResp(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
-	raw, err := config.Render(pn, s.Settings)
+	raw, err := config.Render(pn, s.Settings())
 	if err != nil {
 		errorResp(w, http.StatusInternalServerError, "render: "+err.Error())
 		return
@@ -197,7 +197,7 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		reach.OK = true
 	}
 
-	rendered, err := config.Render(pn, s.Settings)
+	rendered, err := config.Render(pn, s.Settings())
 	if err != nil {
 		errorResp(w, http.StatusInternalServerError, "render: "+err.Error())
 		return
@@ -292,7 +292,8 @@ func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. sing-box процесс
-	st := probe.CollectStatus(s.Settings.TunInterfaceName)
+	settings := s.Settings()
+	st := probe.CollectStatus(settings.TunInterfaceName)
 	if st.SingBoxRunning {
 		add("sing-box процесс", "ok", fmt.Sprintf("PID %d %s", st.SingBoxPID, st.SingBoxVersion))
 	} else {
@@ -315,7 +316,7 @@ func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 5. IP через TUN
-	tunIP, err := probe.TunnelIP(s.Settings.TunInterfaceName, tunnelTimeout)
+	tunIP, err := probe.TunnelIP(settings.TunInterfaceName, tunnelTimeout)
 	switch {
 	case err != nil:
 		add("IP через TUN", "fail", err.Error())
@@ -326,6 +327,126 @@ func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, testResponse{Steps: steps})
+}
+
+// =====================================================================
+// GET  /api/settings
+// POST /api/settings    body: full Settings JSON
+//
+// GET returns current settings plus the resolved effective MixedListen
+// so the UI can show "auto (192.168.10.1)" without overwriting the
+// "auto" preference. POST validates basic invariants, writes YAML to
+// SettingsPath, swaps in-memory settings, and if a node is currently
+// applied (state.json present + matches config.json) — re-renders
+// config.json and restarts sing-box so the new settings take effect.
+// =====================================================================
+
+type settingsResponse struct {
+	Settings              config.Settings `json:"settings"`
+	MixedListenEffective  string          `json:"mixed_listen_effective"`
+	MixedListenAuto       bool            `json:"mixed_listen_auto"`
+	ReRendered            bool            `json:"re_rendered,omitempty"`
+	Restarted             bool            `json:"restarted,omitempty"`
+	RestartErr            string          `json:"restart_error,omitempty"`
+}
+
+func (s *Server) handleSettings(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.handleSettingsGet(w, r)
+	case http.MethodPost:
+		s.handleSettingsPost(w, r)
+	default:
+		errorResp(w, http.StatusMethodNotAllowed, "GET or POST only")
+	}
+}
+
+func (s *Server) handleSettingsGet(w http.ResponseWriter, _ *http.Request) {
+	cur := s.Settings()
+	eff, auto := probe.ResolveMixedListen(cur.MixedListen, config.LANInterface)
+	writeJSON(w, http.StatusOK, settingsResponse{
+		Settings:             cur,
+		MixedListenEffective: eff,
+		MixedListenAuto:      auto,
+	})
+}
+
+func (s *Server) handleSettingsPost(w http.ResponseWriter, r *http.Request) {
+	var newS config.Settings
+	if err := json.NewDecoder(r.Body).Decode(&newS); err != nil {
+		errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if err := validateSettings(newS); err != nil {
+		errorResp(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	if s.SettingsPath != "" {
+		if err := config.SaveSettings(s.SettingsPath, newS); err != nil {
+			errorResp(w, http.StatusInternalServerError, "save settings: "+err.Error())
+			return
+		}
+	}
+	s.setSettings(newS)
+
+	resp := settingsResponse{Settings: newS}
+	eff, auto := probe.ResolveMixedListen(newS.MixedListen, config.LANInterface)
+	resp.MixedListenEffective = eff
+	resp.MixedListenAuto = auto
+
+	// If there is a managed node, re-render config.json with the new settings
+	// and restart sing-box so the changes take effect immediately. If no
+	// managed node — just persist YAML and return (next /api/apply will use
+	// the updated settings).
+	if st := s.readStateFromDisk(); st != nil {
+		if pn, err := parser.Parse(st.URI); err == nil {
+			rendered, rerr := config.Render(pn, newS)
+			if rerr == nil {
+				if _, bakErr := backupIfExists(s.ConfigPath); bakErr == nil {
+					if werr := os.WriteFile(s.ConfigPath, rendered, 0o644); werr == nil {
+						resp.ReRendered = true
+						if rsErr := restartSingBox(s.InitScript); rsErr != nil {
+							resp.RestartErr = rsErr.Error()
+						} else {
+							resp.Restarted = true
+						}
+					} else {
+						resp.RestartErr = "write config: " + werr.Error()
+					}
+				} else {
+					resp.RestartErr = "backup: " + bakErr.Error()
+				}
+			} else {
+				resp.RestartErr = "render: " + rerr.Error()
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// validateSettings rejects values that would render an unusable config.json.
+// We deliberately keep this minimal — the renderer doesn't crash on weird
+// values, sing-box itself will reject them with a clear message on next
+// start. We only catch the cases that would silently break the utility.
+func validateSettings(s config.Settings) error {
+	if s.MixedListenPort < 1 || s.MixedListenPort > 65535 {
+		return fmt.Errorf("mixed_listen_port out of range: %d", s.MixedListenPort)
+	}
+	if s.TunMTU < 576 || s.TunMTU > 9000 {
+		return fmt.Errorf("tun_mtu out of range: %d (expect 576..9000)", s.TunMTU)
+	}
+	if s.TunInterfaceName == "" {
+		return fmt.Errorf("tun_interface_name must not be empty")
+	}
+	if s.TunAddress == "" {
+		return fmt.Errorf("tun_address must not be empty (expected CIDR like 198.18.0.1/30)")
+	}
+	if s.UpstreamDNS == "" {
+		return fmt.Errorf("upstream_dns must not be empty")
+	}
+	return nil
 }
 
 // =====================================================================

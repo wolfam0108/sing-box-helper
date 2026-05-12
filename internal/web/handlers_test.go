@@ -168,6 +168,101 @@ func TestStatus_ReadsFromConfigJSON(t *testing.T) {
 	}
 }
 
+// --- /api/settings -------------------------------------------------------
+
+func TestSettings_GetReturnsDefaults(t *testing.T) {
+	s := newTestServer()
+	req := httptest.NewRequest(http.MethodGet, "/api/settings", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp settingsResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Settings.TunInterfaceName != "singtun" {
+		t.Errorf("default tun_interface_name = %q", resp.Settings.TunInterfaceName)
+	}
+	if resp.Settings.UpstreamDNS != "1.1.1.1" {
+		t.Errorf("default upstream_dns = %q", resp.Settings.UpstreamDNS)
+	}
+	// MixedListen default is "0.0.0.0" (not auto) → effective passes through, auto=false.
+	if resp.MixedListenEffective != "0.0.0.0" || resp.MixedListenAuto {
+		t.Errorf("effective=%q auto=%v, want 0.0.0.0 false", resp.MixedListenEffective, resp.MixedListenAuto)
+	}
+}
+
+func TestSettings_PostPersistsAndSwaps(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.SettingsPath = filepath.Join(tmp, "config.yaml")
+	// Override fs paths to make sure POST doesn't attempt to restart a
+	// real sing-box.
+	s.ConfigPath = filepath.Join(tmp, "sing-box-config.json")
+	s.StatePath = filepath.Join(tmp, "state.json")
+	s.InitScript = filepath.Join(tmp, "no-init-script")
+
+	new := config.DefaultSettings()
+	new.MixedListen = "auto"
+	new.UpstreamDNS = "9.9.9.9"
+	new.MixedListenPort = 7892
+	body, _ := json.Marshal(new)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+
+	// 1. In-memory settings actually swapped.
+	got := s.Settings()
+	if got.UpstreamDNS != "9.9.9.9" || got.MixedListen != "auto" || got.MixedListenPort != 7892 {
+		t.Errorf("in-memory settings not swapped: %+v", got)
+	}
+
+	// 2. YAML file written on disk and round-trips.
+	persisted, err := config.LoadSettings(s.SettingsPath)
+	if err != nil {
+		t.Fatalf("load persisted: %v", err)
+	}
+	if persisted.UpstreamDNS != "9.9.9.9" || persisted.MixedListen != "auto" {
+		t.Errorf("YAML not persisted correctly: %+v", persisted)
+	}
+
+	// 3. Without state.json there's no re-render or restart to do.
+	var resp settingsResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.ReRendered || resp.Restarted {
+		t.Errorf("nothing to re-render without state.json: %+v", resp)
+	}
+
+	// 4. mixed_listen=auto on this dev box falls back to 0.0.0.0 (no br0),
+	// but autodetect flag is true.
+	if !resp.MixedListenAuto {
+		t.Errorf("MixedListenAuto must be true when MixedListen=auto")
+	}
+}
+
+func TestSettings_PostRejectsInvalid(t *testing.T) {
+	s := newTestServer()
+	bad := config.DefaultSettings()
+	bad.MixedListenPort = 0 // invalid
+	body, _ := json.Marshal(bad)
+	req := httptest.NewRequest(http.MethodPost, "/api/settings", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
+	}
+	// In-memory settings unchanged.
+	if s.Settings().MixedListenPort == 0 {
+		t.Errorf("invalid settings leaked into in-memory state")
+	}
+}
+
 // TestStatus_StaleStateMismatch covers the case where state.json points
 // to a different server than what's actually in config.json (someone
 // edited config.json by hand). The user must NOT see misleading "managed"

@@ -5,7 +5,12 @@ import (
 	"errors"
 
 	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfam0108/sing-box-helper/internal/probe"
 )
+
+// LANInterface is the name of the LAN bridge on Keenetic that holds the
+// router's LAN-side IPv4. Used when MixedListen is "auto".
+const LANInterface = "br0"
 
 // Render assembles a complete sing-box config.json from the parsed node
 // and the runtime settings, returning indented JSON bytes ready to be
@@ -57,10 +62,11 @@ func Render(node *parser.ParsedNode, s Settings) ([]byte, error) {
 	}
 
 	if s.EnableMixed {
+		listen, _ := probe.ResolveMixedListen(s.MixedListen, LANInterface)
 		cfg.Inbounds = append(cfg.Inbounds, MixedInbound{
 			Type:       "mixed",
 			Tag:        "test-proxy",
-			Listen:     s.MixedListen,
+			Listen:     listen,
 			ListenPort: s.MixedListenPort,
 		})
 	}
