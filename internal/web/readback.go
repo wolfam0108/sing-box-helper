@@ -26,6 +26,8 @@ var proxyOutboundTypes = map[string]bool{
 	"shadowsocks": true,
 	"tuic":        true,
 	"anytls":      true,
+	"socks":       true,
+	"http":        true,
 }
 
 // readCurrentOutbound parses configPath and returns the first proxy
@@ -79,6 +81,10 @@ func protocolLabel(outboundType string) string {
 		return "TUIC"
 	case "anytls":
 		return "AnyTLS"
+	case "socks":
+		return "SOCKS"
+	case "http":
+		return "HTTP-proxy"
 	default:
 		return outboundType
 	}

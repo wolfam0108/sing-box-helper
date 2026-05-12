@@ -15,9 +15,13 @@ type Outbound struct {
 	Password   string      `json:"password,omitempty"`
 	UUID       string      `json:"uuid,omitempty"`
 	Flow       string      `json:"flow,omitempty"`
-	TLS        *TLSConfig  `json:"tls,omitempty"`
-	Obfs       *ObfsConfig `json:"obfs,omitempty"`
-	Transport  *Transport  `json:"transport,omitempty"`
+	// SOCKS-specific. Version is "4" / "4a" / "5" (sing-box spec).
+	// Username is paired with Password for SOCKS5 auth; for SOCKS4 both are dropped.
+	Version   string      `json:"version,omitempty"`
+	Username  string      `json:"username,omitempty"`
+	TLS       *TLSConfig  `json:"tls,omitempty"`
+	Obfs      *ObfsConfig `json:"obfs,omitempty"`
+	Transport *Transport  `json:"transport,omitempty"`
 }
 
 // TLSConfig mirrors sing-box's outbound TLS settings.

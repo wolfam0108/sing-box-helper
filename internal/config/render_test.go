@@ -217,6 +217,37 @@ func TestRender_VLESSXHTTPReality(t *testing.T) {
 	}
 }
 
+func TestRender_SOCKS5_LocalNoAuth(t *testing.T) {
+	got := renderForURI(t, "socks5://127.0.0.1:1080#mieru-local")
+	proxy := mustMap(t, mustSlice(t, got["outbounds"], "outbounds")[0], "proxy")
+	if proxy["type"] != "socks" || proxy["tag"] != "proxy" {
+		t.Errorf("type/tag = %v/%v", proxy["type"], proxy["tag"])
+	}
+	if proxy["server"] != "127.0.0.1" || proxy["server_port"].(float64) != 1080 {
+		t.Errorf("server/port: %+v", proxy)
+	}
+	if proxy["version"] != "5" {
+		t.Errorf("version = %v", proxy["version"])
+	}
+	if _, has := proxy["username"]; has {
+		t.Errorf("username must be absent when no auth: %v", proxy["username"])
+	}
+	if _, has := proxy["password"]; has {
+		t.Errorf("password must be absent when no auth: %v", proxy["password"])
+	}
+	if _, has := proxy["tls"]; has {
+		t.Errorf("tls must be absent for plain socks: %v", proxy["tls"])
+	}
+}
+
+func TestRender_SOCKS5_WithAuth(t *testing.T) {
+	got := renderForURI(t, "socks5://alice:s3cret@127.0.0.1:1080")
+	proxy := mustMap(t, mustSlice(t, got["outbounds"], "outbounds")[0], "proxy")
+	if proxy["username"] != "alice" || proxy["password"] != "s3cret" {
+		t.Errorf("auth: %+v", proxy)
+	}
+}
+
 func TestRender_DisabledOptions(t *testing.T) {
 	pn, err := parser.Parse("hysteria2://pw@host:443")
 	if err != nil {
