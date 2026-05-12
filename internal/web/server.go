@@ -3,6 +3,7 @@
 package web
 
 import (
+	"io/fs"
 	"net/http"
 	"sync"
 	"time"
@@ -35,13 +36,23 @@ func New(s config.Settings) *Server {
 	}
 }
 
-// Handler returns the http.Handler that wires all the API routes.
+// Handler returns the http.Handler that wires API routes and serves the
+// embedded UI assets from "/".
+//
+// Route precedence: ServeMux uses longest-prefix match, so /api/* hits
+// the API handlers first and "/" falls through to the static file server.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/status", s.handleStatus)
 	mux.HandleFunc("/api/preview", s.handlePreview)
 	mux.HandleFunc("/api/apply", s.handleApply)
 	mux.HandleFunc("/api/test", s.handleTest)
+
+	// Strip the "assets/" prefix so URLs look like /style.css, /app.js.
+	sub, err := fs.Sub(assetsFS, "assets")
+	if err == nil {
+		mux.Handle("/", http.FileServer(http.FS(sub)))
+	}
 	return mux
 }
 
