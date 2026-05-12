@@ -19,13 +19,13 @@ var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 //
 //	vless://uuid@host:port?type=ws&security=tls&sni=cdn.example.com&path=/ws&host=cdn.example.com&fp=chrome#name
 //
-// Supported in MVP-2:
+// Supported:
 //
 //	transports: tcp, ws, grpc, h2, httpupgrade
-//	security:   none, tls
+//	security:   none, tls, reality
 //
-// REALITY (security=reality) and xhttp/splithttp (type=xhttp / type=splithttp)
-// are intentionally rejected — they belong to MVP-3 and MVP-4 respectively.
+// xhttp/splithttp (type=xhttp / type=splithttp) is intentionally rejected —
+// it belongs to MVP-4.
 func ParseVLESS(raw string) (*ParsedNode, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -79,8 +79,15 @@ func ParseVLESS(raw string) (*ParsedNode, error) {
 		out.Flow = flow
 	}
 
-	if security == "tls" {
+	switch security {
+	case "tls":
 		out.TLS = buildVLESSTLS(host, q)
+	case "reality":
+		tls, errTLS := buildVLESSReality(host, q)
+		if errTLS != nil {
+			return nil, errTLS
+		}
+		out.TLS = tls
 	}
 
 	if transportType != "tcp" {
@@ -151,13 +158,12 @@ func pickVLESSSecurity(raw string) (string, error) {
 	if s == "" {
 		s = "none"
 	}
-	if s == "reality" {
-		return "", errors.New("vless: REALITY security is not yet supported (planned for MVP-3)")
-	}
-	if s != "none" && s != "tls" {
+	switch s {
+	case "none", "tls", "reality":
+		return s, nil
+	default:
 		return "", fmt.Errorf("vless: unsupported security %q", s)
 	}
-	return s, nil
 }
 
 func buildVLESSTLS(host string, q url.Values) *TLSConfig {
@@ -184,6 +190,60 @@ func buildVLESSTLS(host string, q url.Values) *TLSConfig {
 		tls.UTLS = &UTLSConfig{Enabled: true, Fingerprint: fp}
 	}
 	return tls
+}
+
+// buildVLESSReality builds a TLS block with the REALITY extension enabled.
+//
+// Required URI parameters:
+//
+//	pbk  — server public key (base64-url), maps to tls.reality.public_key
+//	fp   — uTLS fingerprint (chrome / firefox / safari / ios / edge / random),
+//	       maps to tls.utls.fingerprint
+//	sni  — TLS server_name (the real target hostname being mimicked, e.g.
+//	       "yahoo.com"). Falls back to the URI host only as a last resort —
+//	       REALITY without an explicit sni is almost always misconfigured.
+//
+// Optional:
+//
+//	sid  — short_id (hex), maps to tls.reality.short_id (default: empty)
+//	alpn — comma-separated ALPN list
+//	spx  — spider_x; accepted and ignored (sing-box doesn't expose it as
+//	       of 1.13).
+func buildVLESSReality(host string, q url.Values) (*TLSConfig, error) {
+	pbk := strings.TrimSpace(q.Get("pbk"))
+	if pbk == "" {
+		return nil, errors.New("vless: REALITY requires 'pbk' (public_key) in URI")
+	}
+	fp := strings.TrimSpace(q.Get("fp"))
+	if fp == "" {
+		return nil, errors.New("vless: REALITY requires 'fp' (uTLS fingerprint) in URI")
+	}
+	sni := strings.TrimSpace(q.Get("sni"))
+	if sni == "" {
+		sni = host
+	}
+
+	tls := &TLSConfig{
+		Enabled:    true,
+		ServerName: sni,
+		UTLS: &UTLSConfig{
+			Enabled:     true,
+			Fingerprint: fp,
+		},
+		Reality: &Reality{
+			Enabled:   true,
+			PublicKey: pbk,
+			ShortID:   strings.TrimSpace(q.Get("sid")),
+		},
+	}
+	if alpn := strings.TrimSpace(q.Get("alpn")); alpn != "" {
+		parts := strings.Split(alpn, ",")
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
+		tls.ALPN = parts
+	}
+	return tls, nil
 }
 
 // buildVLESSTransport builds a Transport block for non-tcp transports.

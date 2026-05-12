@@ -117,19 +117,97 @@ func TestParseVLESS_TCPTLSVision(t *testing.T) {
 	}
 }
 
-func TestParseVLESS_RejectsReality(t *testing.T) {
-	// One of the user's real URIs from docs (security=reality).
+func TestParseVLESS_RealityTCPVision(t *testing.T) {
+	// Real URI from docs/ТЗ — TCP + REALITY + Vision (the most common combo
+	// produced by 3x-ui for "vless+reality+vision" nodes).
 	const uri = "vless://a0e5fd22-4aba-4861-a730-2a5b187424cd@ae.mywolfram.ru:58871" +
 		"?type=tcp&encryption=none&security=reality&pbk=tM94SWNzuc___dzCxakr-0F2KF_GlJMIbM0eFtbYsG8" +
 		"&fp=chrome&sni=yahoo.com&sid=42f2121ac05879a3&spx=%2F&flow=xtls-rprx-vision" +
 		"#users-wolframM1"
 
-	_, err := ParseVLESS(uri)
-	if err == nil {
-		t.Fatal("expected REALITY to be rejected in MVP-2")
+	pn, err := ParseVLESS(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "REALITY") {
-		t.Errorf("error = %q; want it to mention REALITY", err.Error())
+	o := pn.Outbound
+
+	if o.Server != "ae.mywolfram.ru" || o.ServerPort != 58871 {
+		t.Errorf("server = %s:%d", o.Server, o.ServerPort)
+	}
+	if o.UUID != "a0e5fd22-4aba-4861-a730-2a5b187424cd" {
+		t.Errorf("UUID = %q", o.UUID)
+	}
+	if o.Flow != "xtls-rprx-vision" {
+		t.Errorf("Flow = %q", o.Flow)
+	}
+	if o.Transport != nil {
+		t.Errorf("Transport for tcp must be nil, got %+v", o.Transport)
+	}
+
+	if o.TLS == nil || !o.TLS.Enabled {
+		t.Fatal("TLS missing or disabled")
+	}
+	if o.TLS.ServerName != "yahoo.com" {
+		t.Errorf("SNI = %q, want yahoo.com", o.TLS.ServerName)
+	}
+	if o.TLS.UTLS == nil || o.TLS.UTLS.Fingerprint != "chrome" {
+		t.Errorf("uTLS = %+v", o.TLS.UTLS)
+	}
+	if o.TLS.Reality == nil || !o.TLS.Reality.Enabled {
+		t.Fatal("Reality block missing/disabled")
+	}
+	if o.TLS.Reality.PublicKey != "tM94SWNzuc___dzCxakr-0F2KF_GlJMIbM0eFtbYsG8" {
+		t.Errorf("pbk = %q", o.TLS.Reality.PublicKey)
+	}
+	if o.TLS.Reality.ShortID != "42f2121ac05879a3" {
+		t.Errorf("sid = %q", o.TLS.Reality.ShortID)
+	}
+	if pn.Label != "users-wolframM1" {
+		t.Errorf("Label = %q", pn.Label)
+	}
+}
+
+func TestParseVLESS_RealityWithoutSID(t *testing.T) {
+	// sid is optional; absent → empty short_id.
+	const uri = "vless://6a99b2ec-0d60-4607-acaa-bf666f29a787@host:443" +
+		"?type=tcp&security=reality&pbk=AAAA_BBBB_CCCC&fp=chrome&sni=example.com"
+
+	pn, err := ParseVLESS(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pn.Outbound.TLS.Reality.ShortID != "" {
+		t.Errorf("ShortID should be empty, got %q", pn.Outbound.TLS.Reality.ShortID)
+	}
+}
+
+func TestParseVLESS_RealityErrors(t *testing.T) {
+	cases := []struct {
+		name string
+		uri  string
+		want string
+	}{
+		{
+			"missing pbk",
+			"vless://6a99b2ec-0d60-4607-acaa-bf666f29a787@host:443?type=tcp&security=reality&fp=chrome&sni=ex.com",
+			"'pbk'",
+		},
+		{
+			"missing fp",
+			"vless://6a99b2ec-0d60-4607-acaa-bf666f29a787@host:443?type=tcp&security=reality&pbk=AAA&sni=ex.com",
+			"'fp'",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseVLESS(tc.uri)
+			if err == nil {
+				t.Fatalf("expected error containing %q, got nil", tc.want)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error = %q, want substring %q", err.Error(), tc.want)
+			}
+		})
 	}
 }
 

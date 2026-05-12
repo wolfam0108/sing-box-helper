@@ -2,7 +2,7 @@
 
 Утилита для управления sing-box на роутерах Keenetic / Entware через простой веб-интерфейс.
 
-**Статус: ранний этап разработки (MVP-2: парсер VLESS vanilla).**
+**Статус: ранний этап разработки (MVP-3: парсер VLESS + REALITY).**
 
 ## Что это
 
@@ -21,7 +21,7 @@
 |---|---|---|
 | MVP-1 | Парсер `hysteria2://` + unit-тесты | ✅ |
 | MVP-2 | Парсер `vless://` (vanilla TCP/TLS/WS/gRPC/h2/httpupgrade) + dispatch | ✅ |
-| MVP-3 | Парсер `vless://` + REALITY | ⏳ |
+| MVP-3 | Парсер `vless://` + REALITY (с uTLS fp и Vision flow) | ✅ |
 | MVP-4 | Парсер `vless://` + REALITY + xhttp | ⏳ |
 | v1.0 | HTTP-сервер + веб-UI + `.ipk`-пакет для Keenetic | ⏳ |
 
