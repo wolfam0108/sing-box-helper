@@ -157,21 +157,43 @@ jobs:
         with:
           path: artifacts
 
-      - name: install opkg-utils
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq opkg-utils
-
       - name: merge .ipk into feed and regenerate Packages
+        # opkg-utils was dropped from Ubuntu 24.04 repos, so we inline
+        # the Packages-index generation. The format is well-defined:
+        # for each .ipk we concatenate its control file then append
+        # Filename / Size / MD5Sum / SHA256sum, separated by blank
+        # lines. opkg parses Packages.gz that way regardless of who
+        # wrote it.
         run: |
+          set -e
+          generate_index() {
+            local d="$1"
+            : > "$d/Packages"
+            for ipk in "$d"/*.ipk; do
+              [ -f "$ipk" ] || continue
+              local tmp
+              tmp=$(mktemp -d)
+              tar -xzf "$ipk" -C "$tmp" control.tar.gz
+              tar -xzf "$tmp/control.tar.gz" -C "$tmp"
+              # Strip a trailing newline from control, then append our
+              # extra metadata fields, then a blank-line separator.
+              sed -e '$a\' "$tmp/control" >> "$d/Packages"
+              {
+                printf 'Filename: %s\n'   "$(basename "$ipk")"
+                printf 'Size: %s\n'       "$(stat -c%s "$ipk")"
+                printf 'MD5Sum: %s\n'     "$(md5sum    "$ipk" | awk '{print $1}')"
+                printf 'SHA256sum: %s\n\n' "$(sha256sum "$ipk" | awk '{print $1}')"
+              } >> "$d/Packages"
+              rm -rf "$tmp"
+            done
+            gzip -9kf "$d/Packages"
+          }
           cd feed
           for arch_dir in ../artifacts/ipk-*; do
             arch=$(basename "$arch_dir" | sed 's/^ipk-//')
             mkdir -p "$arch"
             cp -v "$arch_dir"/*.ipk "$arch/"
-            # opkg-make-index walks the directory and prints to stdout
-            # a Packages index describing every .ipk it finds — both
-            # the brand new ones and the previously-published ones we
-            # checked out above.
-            (cd "$arch" && opkg-make-index . > Packages && gzip -9kf Packages)
+            generate_index "$arch"
             ls -lh "$arch/"
           done
           touch .nojekyll
