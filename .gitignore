@@ -1,6 +1,7 @@
 # Binaries
 /singbox-helper
 /singbox-helper.exe
+/singbox-helper-*
 /bin/
 
 # Test / coverage

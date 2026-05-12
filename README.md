@@ -2,7 +2,7 @@
 
 Утилита для управления sing-box на роутерах Keenetic / Entware через простой веб-интерфейс.
 
-**Статус: ранний этап разработки (MVP-4 завершён: парсер VLESS + REALITY + xhttp).**
+**Статус: ранний этап разработки (v0.5: парсер + рендер config.json + CLI).**
 
 ## Что это
 
@@ -23,14 +23,32 @@
 | MVP-2 | Парсер `vless://` (vanilla TCP/TLS/WS/gRPC/h2/httpupgrade) + dispatch | ✅ |
 | MVP-3 | Парсер `vless://` + REALITY (с uTLS fp и Vision flow) | ✅ |
 | MVP-4 | Парсер `vless://` + REALITY + xhttp (маппинг в httpupgrade) | ✅ |
-| v0.5 | Рендер полного `config.json` + CLI-команда `--from-uri` | ⏳ |
+| v0.5 | Рендер полного `config.json` + CLI-команда `--from-uri` | ✅ |
 | v1.0 | HTTP-сервер + веб-UI + `.ipk`-пакет для Keenetic | ⏳ |
+
+## Запуск CLI
+
+```bash
+# Печать готового config.json
+go run ./cmd/singbox-helper --from-uri 'hysteria2://pw@host:443'
+
+# Запись на диск (с автоматическим бэкапом старого файла)
+go run ./cmd/singbox-helper \
+  --from-uri 'vless://uuid@host:443?type=tcp&security=reality&pbk=...&fp=chrome&sni=ya.ru' \
+  --apply
+
+# Кросс-сборка под Keenetic (mipsle, softfloat) — около 2.7 МБ
+GOOS=linux GOARCH=mipsle GOMIPS=softfloat \
+  go build -trimpath -ldflags='-s -w' -o singbox-helper-mipsle ./cmd/singbox-helper
+```
 
 ## Запуск тестов
 
 ```bash
 go test ./...
 ```
+
+Текущий объём: 25 тестовых функций, все зелёные.
 
 ## Лицензия
 
