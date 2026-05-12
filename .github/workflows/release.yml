@@ -1,0 +1,123 @@
+# Build singbox-helper as .ipk for every supported Entware architecture
+# on every pushed git tag matching v*.*.*, then attach all .ipk files
+# to a GitHub Release named after the tag.
+#
+# Trigger:
+#     git tag v1.0.0 && git push --tags
+#
+# What this workflow does NOT do:
+#     - publish to the gh-pages opkg feed (that lives in feed.yml,
+#       which runs after this one finishes).
+#     - build anything for non-tag pushes. Day-to-day commits never
+#       run CI, so the developer keeps the feedback loop free of
+#       useless artifacts.
+
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  # softprops/action-gh-release needs write access to the Releases
+  # API. Everything else (checkout, artifacts) is read-only.
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.opkg_arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - opkg_arch: mipsel-3.4
+            goos: linux
+            goarch: mipsle
+            gomips: softfloat
+          - opkg_arch: aarch64-3.10
+            goos: linux
+            goarch: arm64
+            gomips: ''
+
+    steps:
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: setup go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: derive version from tag
+        id: ver
+        # github.ref_name is e.g. "v1.0.0"; opkg-control wants "1.0.0"
+        # without the leading v. We expose both.
+        run: |
+          tag=${GITHUB_REF_NAME}
+          ver=${tag#v}
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "ver=$ver" >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (control Version: $ver)"
+
+      - name: tests
+        # Run the full Go test suite once per matrix entry. They are
+        # arch-independent (parser + render + handler unit tests) but
+        # cheap (~3 sec) and a failing one should block a release.
+        run: go test ./...
+
+      - name: cross-build binary
+        env:
+          GOOS:   ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOMIPS: ${{ matrix.gomips }}
+          CGO_ENABLED: '0'
+        run: |
+          go build -trimpath \
+            -ldflags="-s -w -X main.Version=${{ steps.ver.outputs.tag }}" \
+            -o singbox-helper \
+            ./cmd/singbox-helper
+          ls -lh singbox-helper
+
+      - name: pack .ipk
+        env:
+          BINARY:  ./singbox-helper
+          PKGVER:  ${{ steps.ver.outputs.ver }}
+          PKGARCH: ${{ matrix.opkg_arch }}
+          OUTDIR:  ./dist
+        run: bash scripts/build-ipk.sh
+
+      - name: upload .ipk artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipk-${{ matrix.opkg_arch }}
+          path: dist/*.ipk
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: gh-release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: download all .ipk artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # No `name:` -> downloads ALL artifacts uploaded by the
+          # build matrix into separate subdirs under ./artifacts/.
+          path: artifacts
+
+      - name: flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -name '*.ipk' -print -exec mv {} release/ \;
+          ls -lh release/
+
+      - name: create GitHub Release with .ipk attachments
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.ipk
+          generate_release_notes: true
+          fail_on_unmatched_files: true
