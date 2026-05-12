@@ -88,6 +88,77 @@ function row(label, value) {
 
 // --- status (auto-refreshing) -----------------------------------------
 
+function fmtDate(iso) {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function renderCurrentNode(n) {
+  if (!n) {
+    stNode.textContent = 'не задан — нажмите «Применить»';
+    return;
+  }
+  // Always show what's actually in config.json (the truth).
+  const summary = `${n.protocol}  ${n.server}:${n.port}`;
+
+  // Wrap in a small <div> so we can stack secondary lines without
+  // restructuring the parent table.
+  stNode.innerHTML = '';
+  const wrap = document.createElement('div');
+
+  if (n.managed) {
+    // Big readable label as the primary identifier, with the
+    // protocol/server/port as a smaller subtitle.
+    const label = document.createElement('div');
+    label.textContent = n.label || '(без метки)';
+    label.style.fontWeight = '600';
+    wrap.appendChild(label);
+
+    const sub = document.createElement('div');
+    sub.className = 'muted';
+    sub.textContent = summary + (n.applied_at ? `   ·   применён ${fmtDate(n.applied_at)}` : '');
+    sub.style.marginTop = '2px';
+    wrap.appendChild(sub);
+
+    if (n.uri) {
+      const uriWrap = document.createElement('div');
+      uriWrap.style.marginTop = '6px';
+
+      const toggle = document.createElement('button');
+      toggle.className = 'btn-link';
+      toggle.textContent = 'Показать URI';
+      const pre = document.createElement('pre');
+      pre.className = 'hidden';
+      pre.textContent = n.uri;
+      pre.style.marginTop = '4px';
+      toggle.addEventListener('click', () => {
+        const hidden = pre.classList.toggle('hidden');
+        toggle.textContent = hidden ? 'Показать URI' : 'Скрыть URI';
+      });
+      uriWrap.appendChild(toggle);
+      uriWrap.appendChild(pre);
+      wrap.appendChild(uriWrap);
+    }
+  } else {
+    // sing-box is running with a config that wasn't applied through
+    // this utility (no state.json, or it disagrees with config.json).
+    const main = document.createElement('div');
+    main.textContent = summary;
+    wrap.appendChild(main);
+
+    const tag = document.createElement('div');
+    tag.className = 'muted';
+    tag.textContent = 'конфиг не управляется через эту утилиту (нет метаданных URI)';
+    tag.style.marginTop = '2px';
+    wrap.appendChild(tag);
+  }
+
+  stNode.appendChild(wrap);
+}
+
 async function refreshStatus() {
   try {
     const s = await api('/api/status');
@@ -97,9 +168,7 @@ async function refreshStatus() {
     stTun.textContent = s.tun_up
       ? `UP (${s.tun_name})`
       : `down (${s.tun_name})`;
-    stNode.textContent = s.current_node
-      ? `${s.current_node.protocol}  ${s.current_node.server}:${s.current_node.port}`
-      : 'не задан (нажмите "Применить")';
+    renderCurrentNode(s.current_node);
 
     if (s.sing_box_running && s.tun_up) {
       statusPill.className = 'pill pill-green';
@@ -114,7 +183,8 @@ async function refreshStatus() {
   } catch (e) {
     statusPill.className = 'pill pill-red';
     statusPill.textContent = '● API недоступен';
-    stSb.textContent = stTun.textContent = stNode.textContent = '—';
+    stSb.textContent = stTun.textContent = '—';
+    stNode.textContent = '—';
   }
 }
 

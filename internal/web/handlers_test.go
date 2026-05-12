@@ -5,11 +5,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/wolfam0108/sing-box-helper/internal/config"
-	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfam0108/sing-box-helper/internal/state"
 )
 
 func newTestServer() *Server {
@@ -101,14 +104,92 @@ func TestStatus_Basic(t *testing.T) {
 	}
 }
 
-func TestStatus_WithLastApplied(t *testing.T) {
+// TestStatus_ReadsFromConfigJSON verifies that /api/status reads the
+// currently-running outbound from config.json (the source of truth) AND
+// pairs it with state.json metadata when they agree.
+func TestStatus_ReadsFromConfigJSON(t *testing.T) {
+	tmp := t.TempDir()
 	s := newTestServer()
-	// Inject a fake lastApplied via the unexported setter.
-	pn, err := parser.Parse("hysteria2://pw@host.example.com:2053")
-	if err != nil {
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	s.StatePath = filepath.Join(tmp, "state.json")
+
+	// Write a minimal valid sing-box config.json with an Hy2 outbound.
+	cfg := `{
+	  "outbounds": [
+	    {"type":"hysteria2","tag":"proxy","server":"host.example.com","server_port":2053},
+	    {"type":"direct","tag":"direct"}
+	  ]
+	}`
+	if err := os.WriteFile(s.ConfigPath, []byte(cfg), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	s.setLastApplied(pn)
+
+	// First: state.json missing → managed=false.
+	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	var resp statusResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.CurrentNode == nil {
+		t.Fatal("current_node should be populated from config.json")
+	}
+	if resp.CurrentNode.Managed {
+		t.Errorf("managed should be false without state.json")
+	}
+	if resp.CurrentNode.Protocol != "Hysteria2" {
+		t.Errorf("protocol = %q", resp.CurrentNode.Protocol)
+	}
+	if resp.CurrentNode.Server != "host.example.com" || resp.CurrentNode.Port != 2053 {
+		t.Errorf("server:port = %s:%d", resp.CurrentNode.Server, resp.CurrentNode.Port)
+	}
+
+	// Now: state.json that matches config.json → managed=true with metadata.
+	at := time.Date(2026, 5, 12, 15, 30, 0, 0, time.UTC)
+	if err := state.Save(s.StatePath, &state.State{
+		URI:       "hysteria2://pw@host.example.com:2053#my-node",
+		Label:     "my-node",
+		AppliedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec = httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if !resp.CurrentNode.Managed {
+		t.Errorf("managed should be true after writing matching state.json")
+	}
+	if resp.CurrentNode.Label != "my-node" {
+		t.Errorf("label = %q", resp.CurrentNode.Label)
+	}
+	if resp.CurrentNode.AppliedAt == nil || !resp.CurrentNode.AppliedAt.Equal(at) {
+		t.Errorf("applied_at = %v, want %v", resp.CurrentNode.AppliedAt, at)
+	}
+}
+
+// TestStatus_StaleStateMismatch covers the case where state.json points
+// to a different server than what's actually in config.json (someone
+// edited config.json by hand). The user must NOT see misleading "managed"
+// metadata for a different node.
+func TestStatus_StaleStateMismatch(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	s.StatePath = filepath.Join(tmp, "state.json")
+
+	cfg := `{"outbounds":[{"type":"vless","tag":"proxy","server":"new.example.com","server_port":443,"uuid":"6a99b2ec-0d60-4607-acaa-bf666f29a787"}]}`
+	if err := os.WriteFile(s.ConfigPath, []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// state.json points at an OLD server.
+	if err := state.Save(s.StatePath, &state.State{
+		URI:       "hysteria2://pw@old.example.com:2053",
+		Label:     "old",
+		AppliedAt: time.Now(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/status", nil)
 	rec := httptest.NewRecorder()
@@ -117,9 +198,17 @@ func TestStatus_WithLastApplied(t *testing.T) {
 	var resp statusResponse
 	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
 	if resp.CurrentNode == nil {
-		t.Fatal("current_node should be populated")
+		t.Fatal("current_node should be set")
 	}
-	if resp.CurrentNode.Server != "host.example.com" || resp.CurrentNode.Port != 2053 {
-		t.Errorf("current_node = %+v", resp.CurrentNode)
+	if resp.CurrentNode.Managed {
+		t.Error("managed must be false when state and config disagree")
+	}
+	if resp.CurrentNode.Server != "new.example.com" {
+		t.Errorf("server should reflect config.json, got %q", resp.CurrentNode.Server)
+	}
+	if resp.CurrentNode.Label != "" || resp.CurrentNode.URI != "" {
+		t.Errorf("label/uri should be empty when state is stale, got label=%q uri=%q",
+			resp.CurrentNode.Label, resp.CurrentNode.URI)
 	}
 }
+

@@ -46,10 +46,17 @@ type statusResponse struct {
 	CurrentNode *currentNodeInfo `json:"current_node,omitempty"`
 }
 
+// currentNodeInfo carries everything the UI needs to identify the running
+// node. Managed=false means "sing-box is running with some other config
+// that this utility didn't apply" — UI should treat the metadata as absent.
 type currentNodeInfo struct {
-	Protocol string `json:"protocol"`
-	Server   string `json:"server"`
-	Port     int    `json:"port"`
+	Managed   bool       `json:"managed"`
+	Label     string     `json:"label,omitempty"`
+	URI       string     `json:"uri,omitempty"`
+	AppliedAt *time.Time `json:"applied_at,omitempty"`
+	Protocol  string     `json:"protocol,omitempty"`
+	Server    string     `json:"server,omitempty"`
+	Port      int        `json:"port,omitempty"`
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -60,13 +67,38 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	resp := statusResponse{
 		Status: probe.CollectStatus(s.Settings.TunInterfaceName),
 	}
-	if n := s.getLastApplied(); n != nil {
-		resp.CurrentNode = &currentNodeInfo{
-			Protocol: n.Display.Protocol,
-			Server:   n.Outbound.Server,
-			Port:     n.Outbound.ServerPort,
+
+	// Source of truth: read the actual sing-box config.json.
+	current := readCurrentOutbound(s.ConfigPath)
+	if current == nil {
+		// No config (or it's broken). Nothing to report.
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	info := &currentNodeInfo{
+		Protocol: protocolLabel(current.Type),
+		Server:   current.Server,
+		Port:     current.ServerPort,
+	}
+
+	// Optional metadata layer: state.json contains the original URI / label /
+	// time. We treat it as authoritative only if it matches what's actually
+	// in config.json (same server+port) — otherwise the state is stale
+	// (someone edited the config by hand) and we honestly say managed=false.
+	if st := s.readStateFromDisk(); st != nil {
+		if pn, err := parser.Parse(st.URI); err == nil &&
+			pn.Outbound.Server == current.Server &&
+			pn.Outbound.ServerPort == current.ServerPort {
+			info.Managed = true
+			info.Label = st.Label
+			info.URI = st.URI
+			at := st.AppliedAt
+			info.AppliedAt = &at
 		}
 	}
+
+	resp.CurrentNode = info
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -200,7 +232,15 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		resp.Restarted = true
 	}
 
-	s.setLastApplied(pn)
+	// Persist metadata so /api/status shows label / URI / time on the next
+	// poll. The on-disk config.json itself is the source of truth for
+	// "what's running"; state.json adds info sing-box doesn't track.
+	// Failure to persist must NOT roll back the (already-applied + restarted)
+	// config — we just surface it as a soft error.
+	if err := s.saveStateToDisk(req.URI, pn.Label, time.Now().UTC()); err != nil {
+		resp.RestartErr = strings.TrimSpace(resp.RestartErr + " | state save: " + err.Error())
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -231,22 +271,24 @@ func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
 		steps = append(steps, testStep{Name: name, Status: status, Detail: detail})
 	}
 
-	// 1. Reachability of the current node
-	if n := s.getLastApplied(); n != nil {
-		network := probe.ProtoNetwork(n.Outbound.Type)
+	// 1. Reachability of the current node — read from the actual config.json
+	// rather than a memory cache, so the probe always matches what sing-box
+	// is really talking to.
+	if current := readCurrentOutbound(s.ConfigPath); current != nil {
+		network := probe.ProtoNetwork(current.Type)
 		t0 := time.Now()
-		err := probe.Reach(network, n.Outbound.Server, n.Outbound.ServerPort, reachTimeout)
+		err := probe.Reach(network, current.Server, current.ServerPort, reachTimeout)
 		switch {
 		case err != nil:
 			add("Доступность узла", "fail", err.Error())
 		default:
 			add("Доступность узла", "ok",
 				fmt.Sprintf("%s %s:%d, %d ms",
-					strings.ToUpper(network), n.Outbound.Server, n.Outbound.ServerPort,
+					strings.ToUpper(network), current.Server, current.ServerPort,
 					time.Since(t0).Milliseconds()))
 		}
 	} else {
-		add("Доступность узла", "skip", "Нет ранее применённого URI")
+		add("Доступность узла", "skip", "В config.json нет proxy-outbound")
 	}
 
 	// 2. sing-box процесс

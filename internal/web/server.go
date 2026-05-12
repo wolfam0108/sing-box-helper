@@ -5,25 +5,26 @@ package web
 import (
 	"io/fs"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/wolfam0108/sing-box-helper/internal/config"
-	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfam0108/sing-box-helper/internal/state"
 )
 
 // Server holds the runtime state and configuration for the API.
+//
+// The "what's currently running" question is answered by reading
+// /opt/etc/sing-box/config.json on every /api/status — that's the
+// source of truth. state.json on disk carries only metadata we added
+// (the original URI string, the friendly label, when it was applied)
+// which sing-box itself doesn't track.
 type Server struct {
 	Settings    config.Settings
 	ConfigPath  string // path to /opt/etc/sing-box/config.json
 	InitScript  string // path to /opt/etc/init.d/S99sing-box
 	BackupDir   string // optional separate dir for backups; if empty, beside ConfigPath
+	StatePath   string // path to state.json (URI + label + applied_at)
 	KeepBackups int    // 0 = keep all
-
-	// lastApplied stores the most recently applied parsed node so /api/test
-	// knows what server:port to probe. nil until first /api/apply.
-	mu          sync.Mutex
-	lastApplied *parser.ParsedNode
 }
 
 // New creates a Server with sensible defaults.
@@ -32,8 +33,29 @@ func New(s config.Settings) *Server {
 		Settings:    s,
 		ConfigPath:  "/opt/etc/sing-box/config.json",
 		InitScript:  "/opt/etc/init.d/S99sing-box",
+		StatePath:   "/opt/etc/singbox-helper/state.json",
 		KeepBackups: 10,
 	}
+}
+
+// readStateFromDisk returns the persisted metadata or nil if absent /
+// corrupt. Errors are intentionally swallowed — UI only loses extra labels.
+func (s *Server) readStateFromDisk() *state.State {
+	st, err := state.Load(s.StatePath)
+	if err != nil {
+		return nil
+	}
+	return st
+}
+
+// saveStateToDisk persists the latest applied URI + label + timestamp.
+// Called from /api/apply on success.
+func (s *Server) saveStateToDisk(uri, label string, at time.Time) error {
+	return state.Save(s.StatePath, &state.State{
+		URI:       uri,
+		Label:     label,
+		AppliedAt: at,
+	})
 }
 
 // Handler returns the http.Handler that wires API routes and serves the
@@ -70,14 +92,3 @@ func (s *Server) ListenAndServe(addr string) error {
 	return srv.ListenAndServe()
 }
 
-func (s *Server) getLastApplied() *parser.ParsedNode {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lastApplied
-}
-
-func (s *Server) setLastApplied(n *parser.ParsedNode) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lastApplied = n
-}
