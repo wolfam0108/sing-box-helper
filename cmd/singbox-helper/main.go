@@ -20,9 +20,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/wolfam0108/sing-box-helper/internal/config"
-	"github.com/wolfam0108/sing-box-helper/internal/parser"
-	"github.com/wolfam0108/sing-box-helper/internal/web"
+	"github.com/wolfram0108/sing-box-helper/internal/config"
+	"github.com/wolfram0108/sing-box-helper/internal/parser"
+	"github.com/wolfram0108/sing-box-helper/internal/web"
 )
 
 // Version is overridden at build time via -ldflags "-X main.Version=v1.0.0".

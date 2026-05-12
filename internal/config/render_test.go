@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfram0108/sing-box-helper/internal/parser"
 )
 
 // renderForURI is a tiny helper: parse a URI with the dispatcher and render

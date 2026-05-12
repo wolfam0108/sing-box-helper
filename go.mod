@@ -1,4 +1,4 @@
-module github.com/wolfam0108/sing-box-helper
+module github.com/wolfram0108/sing-box-helper
 
 go 1.26.2
 

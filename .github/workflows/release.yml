@@ -212,11 +212,11 @@ jobs:
           <h2>Supported architectures</h2>
           <ul>
             <li><a href="mipsel-3.4/">mipsel-3.4</a> — Keenetic / Xiaomi on MT7621 / MT7620 (most common)
-              <pre>src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/mipsel-3.4</pre></li>
+              <pre>src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/mipsel-3.4</pre></li>
             <li><a href="aarch64-3.10/">aarch64-3.10</a> — new Keenetic Hopper / Hero / Giga (ARM64)
-              <pre>src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/aarch64-3.10</pre></li>
+              <pre>src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/aarch64-3.10</pre></li>
           </ul>
-          <p><a href="https://github.com/wolfam0108/sing-box-helper">Source on GitHub</a></p>
+          <p><a href="https://github.com/wolfram0108/sing-box-helper">Source on GitHub</a></p>
           </body></html>
           HTML
 

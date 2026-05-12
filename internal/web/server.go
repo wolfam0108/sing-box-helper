@@ -8,9 +8,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wolfam0108/sing-box-helper/internal/config"
-	"github.com/wolfam0108/sing-box-helper/internal/logbuf"
-	"github.com/wolfam0108/sing-box-helper/internal/state"
+	"github.com/wolfram0108/sing-box-helper/internal/config"
+	"github.com/wolfram0108/sing-box-helper/internal/logbuf"
+	"github.com/wolfram0108/sing-box-helper/internal/state"
 )
 
 // Server holds the runtime state and configuration for the API.

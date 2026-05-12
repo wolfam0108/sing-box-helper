@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/wolfam0108/sing-box-helper/internal/config"
-	"github.com/wolfam0108/sing-box-helper/internal/state"
+	"github.com/wolfram0108/sing-box-helper/internal/config"
+	"github.com/wolfram0108/sing-box-helper/internal/state"
 )
 
 func newTestServer() *Server {

@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 
-	"github.com/wolfam0108/sing-box-helper/internal/parser"
-	"github.com/wolfam0108/sing-box-helper/internal/probe"
+	"github.com/wolfram0108/sing-box-helper/internal/parser"
+	"github.com/wolfram0108/sing-box-helper/internal/probe"
 )
 
 // LANInterface is the name of the LAN bridge on Keenetic that holds the

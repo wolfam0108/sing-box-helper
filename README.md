@@ -21,11 +21,11 @@
 
 ```sh
 # mipsel — старые Keenetic / Xiaomi на MT7621/MT7620 (Mi Router 3G и т.п.)
-echo 'src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/mipsel-3.4' \
+echo 'src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/mipsel-3.4' \
   >> /opt/etc/opkg.conf
 
 # aarch64 — новые Keenetic Hopper / Hero / Giga
-echo 'src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/aarch64-3.10' \
+echo 'src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/aarch64-3.10' \
   >> /opt/etc/opkg.conf
 
 opkg update
