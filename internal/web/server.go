@@ -33,6 +33,7 @@ type Server struct {
 	SettingsPath string         // path to /opt/etc/singbox-helper/config.yaml
 	KeepBackups  int            // 0 = keep all
 	Logs         *logbuf.Buffer // helper-process log ring; nil → no /api/logs?source=helper
+	Version      string         // helper version surfaced in /api/status (set from main)
 }
 
 // New creates a Server with sensible defaults.

@@ -86,6 +86,7 @@ func main() {
 func runServer(addr, settingsPath string, s config.Settings) error {
 	srv := web.New(s)
 	srv.SettingsPath = settingsPath
+	srv.Version = Version
 
 	// Tee stderr into the ring buffer that /api/logs?source=helper exposes,
 	// so the Logs tab shows the same lines the operator sees when running

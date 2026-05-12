@@ -184,6 +184,9 @@ function renderCurrentNode(n) {
 async function refreshStatus() {
   try {
     const s = await api('/api/status');
+    if (s.helper_version) {
+      $('helper-version').textContent = s.helper_version;
+    }
     stSb.textContent = s.sing_box_running
       ? `running, PID ${s.sing_box_pid || '?'} — ${s.sing_box_version || ''}`
       : 'не запущен';

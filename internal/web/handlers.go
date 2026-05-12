@@ -45,7 +45,8 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 type statusResponse struct {
 	probe.Status
-	CurrentNode *currentNodeInfo `json:"current_node,omitempty"`
+	HelperVersion string           `json:"helper_version,omitempty"`
+	CurrentNode   *currentNodeInfo `json:"current_node,omitempty"`
 }
 
 // currentNodeInfo carries everything the UI needs to identify the running
@@ -67,7 +68,8 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := statusResponse{
-		Status: probe.CollectStatus(s.Settings().TunInterfaceName),
+		Status:        probe.CollectStatus(s.Settings().TunInterfaceName),
+		HelperVersion: s.Version,
 	}
 
 	// Source of truth: read the actual sing-box config.json.
