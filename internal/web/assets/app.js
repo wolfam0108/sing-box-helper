@@ -96,7 +96,29 @@ function fmtDate(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+// Cached identity of the last rendered current_node, used to skip the DOM
+// rebuild when /api/status returns the same node. Without this guard the
+// 5-second auto-refresh would collapse the "Показать URI" panel every time.
+let _lastNodeKey = null;
+
+function nodeKey(n) {
+  if (!n) return 'null';
+  return [
+    n.managed ? '1' : '0',
+    n.protocol || '',
+    n.server || '',
+    n.port || 0,
+    n.label || '',
+    n.applied_at || '',
+    n.uri || '',
+  ].join('|');
+}
+
 function renderCurrentNode(n) {
+  const key = nodeKey(n);
+  if (key === _lastNodeKey) return; // nothing to redraw; preserve any UI state
+  _lastNodeKey = key;
+
   if (!n) {
     stNode.textContent = 'не задан — нажмите «Применить»';
     return;
@@ -185,6 +207,7 @@ async function refreshStatus() {
     statusPill.textContent = '● API недоступен';
     stSb.textContent = stTun.textContent = '—';
     stNode.textContent = '—';
+    _lastNodeKey = null; // force a real redraw on the next successful poll
   }
 }
 

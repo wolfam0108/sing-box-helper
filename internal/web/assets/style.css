@@ -181,8 +181,13 @@ pre {
   border-radius: 4px;
   font-family: ui-monospace, "Cascadia Mono", Menlo, Consolas, monospace;
   font-size: 12px;
-  overflow-x: auto;
-  white-space: pre;
+  /* Wrap long lines (URIs, single-line JSON values) so the block can't
+     push the card wider than its container. JSON indents are preserved
+     because pre-wrap keeps whitespace. */
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  max-width: 100%;
 }
 pre.err {
   background: var(--err-bg);
