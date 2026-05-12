@@ -13,7 +13,17 @@
   <div id="status-pill" class="pill pill-gray">● проверка…</div>
 </header>
 
+<nav class="tabs">
+  <button class="tab active" data-tab="home">Главная</button>
+  <button class="tab"        data-tab="settings">Настройки</button>
+  <button class="tab"        data-tab="logs">Логи</button>
+  <button class="tab"        data-tab="backups">Бэкапы</button>
+</nav>
+
 <main>
+
+<!-- =============================== HOME =============================== -->
+<div id="tab-home" class="tab-pane">
 
 <section class="card">
   <div class="card-head">
@@ -29,8 +39,8 @@
 
 <section class="card">
   <h2>Применить узел</h2>
-  <p class="muted">Вставьте ссылку <code>hysteria2://</code>, <code>hy2://</code> или <code>vless://</code> (vanilla, REALITY, xhttp).</p>
-  <textarea id="uri-input" rows="3" placeholder="hysteria2://password@host:port    или    vless://uuid@host:port?type=tcp&amp;security=reality&amp;pbk=…"></textarea>
+  <p class="muted">Вставьте ссылку <code>hysteria2://</code>, <code>hy2://</code>, <code>vless://</code> (vanilla, REALITY, xhttp) или <code>socks5://</code>.</p>
+  <textarea id="uri-input" rows="3" placeholder="hysteria2://password@host:port    или    vless://uuid@host:port?type=tcp&amp;security=reality&amp;pbk=…    или    socks5://127.0.0.1:1080"></textarea>
   <div class="actions">
     <button id="btn-preview">Превью</button>
     <button id="btn-apply" class="primary">Применить</button>
@@ -63,6 +73,124 @@
   <h2>Проверка работы</h2>
   <ol id="test-steps" class="steps"></ol>
 </section>
+
+</div>
+
+<!-- ============================= SETTINGS ============================= -->
+<div id="tab-settings" class="tab-pane hidden">
+
+<section class="card">
+  <div class="card-head">
+    <h2>Тестовый mixed-proxy</h2>
+    <span class="muted">SOCKS5/HTTP-вход для проверки туннеля с LAN</span>
+  </div>
+  <table class="form-kv">
+    <tr>
+      <th>Адрес прослушивания</th>
+      <td>
+        <label><input type="radio" name="mixed_mode" value="auto"> Автоопределение (br0) <span id="settings-auto-resolved" class="muted"></span></label>
+        <label><input type="radio" name="mixed_mode" value="127.0.0.1"> Только локально (127.0.0.1)</label>
+        <label><input type="radio" name="mixed_mode" value="0.0.0.0"> Все интерфейсы (0.0.0.0)</label>
+        <label><input type="radio" name="mixed_mode" value="custom"> Указать вручную: <input type="text" id="settings-mixed-listen-custom" placeholder="192.168.1.1"></label>
+      </td>
+    </tr>
+    <tr><th>Порт</th><td><input type="number" id="settings-mixed-port" min="1" max="65535"></td></tr>
+    <tr><th><label><input type="checkbox" id="settings-enable-mixed"> Включить mixed-proxy</label></th><td></td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>TUN-интерфейс</h2>
+  <table class="form-kv">
+    <tr><th>Имя интерфейса</th><td><input type="text" id="settings-tun-iface"> <span class="muted">должно совпадать с keen-pbr и netfilter-хуком</span></td></tr>
+    <tr><th>Адрес (CIDR)</th><td><input type="text" id="settings-tun-addr"></td></tr>
+    <tr><th>MTU</th><td><input type="number" id="settings-tun-mtu" min="576" max="9000"></td></tr>
+    <tr>
+      <th>Стек</th>
+      <td>
+        <select id="settings-tun-stack">
+          <option value="gvisor">gvisor</option>
+          <option value="system">system</option>
+          <option value="mixed">mixed</option>
+        </select>
+      </td>
+    </tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>DNS для sing-box</h2>
+  <table class="form-kv">
+    <tr><th>Upstream DNS</th><td><input type="text" id="settings-dns-upstream"></td></tr>
+    <tr>
+      <th>Стратегия</th>
+      <td>
+        <select id="settings-dns-strategy">
+          <option value="ipv4_only">ipv4_only</option>
+          <option value="prefer_ipv4">prefer_ipv4</option>
+          <option value="prefer_ipv6">prefer_ipv6</option>
+          <option value="ipv6_only">ipv6_only</option>
+        </select>
+      </td>
+    </tr>
+  </table>
+  <p class="muted">Это DNS только для резолва имени самого узла. На DNS LAN-клиентов не влияет.</p>
+</section>
+
+<section class="card">
+  <h2>Clash API (для дашбордов)</h2>
+  <table class="form-kv">
+    <tr><th><label><input type="checkbox" id="settings-enable-clash"> Включить</label></th><td></td></tr>
+    <tr><th>Адрес+порт</th><td><input type="text" id="settings-clash-listen" placeholder="0.0.0.0:9090"></td></tr>
+    <tr><th>Каталог UI</th><td><input type="text" id="settings-clash-uidir"></td></tr>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Логирование sing-box</h2>
+  <table class="form-kv">
+    <tr>
+      <th>Уровень</th>
+      <td>
+        <select id="settings-log-level">
+          <option value="trace">trace</option>
+          <option value="debug">debug</option>
+          <option value="info">info</option>
+          <option value="warn">warn</option>
+          <option value="error">error</option>
+          <option value="fatal">fatal</option>
+          <option value="panic">panic</option>
+        </select>
+      </td>
+    </tr>
+    <tr><th><label><input type="checkbox" id="settings-log-ts"> Отметки времени</label></th><td></td></tr>
+  </table>
+</section>
+
+<div class="actions" style="margin-top:8px">
+  <button id="btn-settings-save" class="primary">Сохранить</button>
+  <button id="btn-settings-reload">Перезагрузить</button>
+  <span id="settings-status" class="muted"></span>
+</div>
+<div id="settings-busy" class="busy hidden">⏳ сохраняем…</div>
+
+</div>
+
+<!-- ============================== LOGS ============================== -->
+<div id="tab-logs" class="tab-pane hidden">
+  <section class="card">
+    <h2>Логи</h2>
+    <p class="muted">Эта вкладка появится в следующем коммите (δ): источники <code>sing-box</code> и <code>helper</code>, автообновление.</p>
+  </section>
+</div>
+
+<!-- ============================ BACKUPS ============================ -->
+<div id="tab-backups" class="tab-pane hidden">
+  <section class="card">
+    <h2>Бэкапы</h2>
+    <p class="muted">Эта вкладка появится в следующем коммите (ε): список бэкапов, откат, удаление.</p>
+  </section>
+</div>
 
 </main>
 

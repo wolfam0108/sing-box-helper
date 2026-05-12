@@ -232,6 +232,70 @@ ol.steps li:last-child { border-bottom: none; }
   font-size: 13px;
 }
 
+/* tabs */
+nav.tabs {
+  display: flex;
+  gap: 4px;
+  padding: 0 24px;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+}
+nav.tabs .tab {
+  border: none;
+  background: transparent;
+  padding: 10px 16px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  color: var(--muted);
+  cursor: pointer;
+  font-weight: 500;
+}
+nav.tabs .tab:hover { background: #f3f4f6; color: var(--text); }
+nav.tabs .tab.active {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+  background: transparent;
+}
+
+/* settings form */
+table.form-kv {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+table.form-kv th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--muted);
+  padding: 8px 12px 8px 0;
+  width: 32%;
+  vertical-align: top;
+}
+table.form-kv td {
+  padding: 8px 0;
+}
+table.form-kv td label {
+  display: block;
+  padding: 2px 0;
+}
+table.form-kv input[type="text"],
+table.form-kv input[type="number"],
+table.form-kv select {
+  font: inherit;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+}
+table.form-kv input[type="text"] { min-width: 180px; }
+table.form-kv input[type="number"] { width: 90px; }
+table.form-kv input[type="text"]:focus,
+table.form-kv input[type="number"]:focus,
+table.form-kv select:focus {
+  outline: 2px solid var(--primary);
+  outline-offset: -1px;
+}
+
 /* misc */
 .hidden { display: none !important; }
 .muted  { color: var(--muted); font-size: 12px; }

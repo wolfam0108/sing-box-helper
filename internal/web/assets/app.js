@@ -328,6 +328,148 @@ btnApply.addEventListener('click', doApply);
 btnTest.addEventListener('click', () => runTest(false));
 btnRefresh.addEventListener('click', refreshStatus);
 
+// --- tabs --------------------------------------------------------------
+
+const tabs = Array.from(document.querySelectorAll('nav.tabs .tab'));
+const panes = {
+  home:     $('tab-home'),
+  settings: $('tab-settings'),
+  logs:     $('tab-logs'),
+  backups:  $('tab-backups'),
+};
+
+function activateTab(name) {
+  for (const t of tabs) t.classList.toggle('active', t.dataset.tab === name);
+  for (const k of Object.keys(panes)) panes[k].classList.toggle('hidden', k !== name);
+  if (name === 'settings') loadSettings();
+}
+
+for (const t of tabs) {
+  t.addEventListener('click', () => activateTab(t.dataset.tab));
+}
+
+// --- settings ----------------------------------------------------------
+
+const $settings = {
+  mixedModeRadios:  () => Array.from(document.querySelectorAll('input[name="mixed_mode"]')),
+  mixedCustom:      () => $('settings-mixed-listen-custom'),
+  mixedPort:        () => $('settings-mixed-port'),
+  enableMixed:      () => $('settings-enable-mixed'),
+  tunIface:         () => $('settings-tun-iface'),
+  tunAddr:          () => $('settings-tun-addr'),
+  tunMtu:           () => $('settings-tun-mtu'),
+  tunStack:         () => $('settings-tun-stack'),
+  dnsUpstream:      () => $('settings-dns-upstream'),
+  dnsStrategy:      () => $('settings-dns-strategy'),
+  enableClash:      () => $('settings-enable-clash'),
+  clashListen:      () => $('settings-clash-listen'),
+  clashUiDir:       () => $('settings-clash-uidir'),
+  logLevel:         () => $('settings-log-level'),
+  logTs:            () => $('settings-log-ts'),
+  status:           () => $('settings-status'),
+  busy:             () => $('settings-busy'),
+  autoResolved:     () => $('settings-auto-resolved'),
+};
+
+function mixedListenFromForm() {
+  const r = $settings.mixedModeRadios().find(x => x.checked);
+  if (!r) return 'auto';
+  if (r.value === 'custom') return ($settings.mixedCustom().value || '').trim();
+  return r.value;
+}
+
+function setMixedListenInForm(value) {
+  const known = ['auto', '127.0.0.1', '0.0.0.0'];
+  const radios = $settings.mixedModeRadios();
+  if (known.includes(value)) {
+    for (const r of radios) r.checked = (r.value === value);
+    $settings.mixedCustom().value = '';
+  } else {
+    for (const r of radios) r.checked = (r.value === 'custom');
+    $settings.mixedCustom().value = value || '';
+  }
+}
+
+function settingsFromForm() {
+  return {
+    mixed_listen:        mixedListenFromForm(),
+    mixed_listen_port:   Number($settings.mixedPort().value) || 0,
+    enable_mixed:        $settings.enableMixed().checked,
+    tun_interface_name:  $settings.tunIface().value.trim(),
+    tun_address:         $settings.tunAddr().value.trim(),
+    tun_mtu:             Number($settings.tunMtu().value) || 0,
+    tun_stack:           $settings.tunStack().value,
+    upstream_dns:        $settings.dnsUpstream().value.trim(),
+    dns_strategy:        $settings.dnsStrategy().value,
+    enable_clash_api:    $settings.enableClash().checked,
+    clash_api_listen:    $settings.clashListen().value.trim(),
+    clash_api_ui_dir:    $settings.clashUiDir().value.trim(),
+    log_level:           $settings.logLevel().value,
+    log_timestamp:       $settings.logTs().checked,
+  };
+}
+
+function settingsToForm(s, effective, isAuto) {
+  setMixedListenInForm(s.mixed_listen);
+  $settings.mixedPort().value     = s.mixed_listen_port;
+  $settings.enableMixed().checked = !!s.enable_mixed;
+  $settings.tunIface().value      = s.tun_interface_name || '';
+  $settings.tunAddr().value       = s.tun_address || '';
+  $settings.tunMtu().value        = s.tun_mtu;
+  $settings.tunStack().value      = s.tun_stack || 'gvisor';
+  $settings.dnsUpstream().value   = s.upstream_dns || '';
+  $settings.dnsStrategy().value   = s.dns_strategy || 'ipv4_only';
+  $settings.enableClash().checked = !!s.enable_clash_api;
+  $settings.clashListen().value   = s.clash_api_listen || '';
+  $settings.clashUiDir().value    = s.clash_api_ui_dir || '';
+  $settings.logLevel().value      = s.log_level || 'info';
+  $settings.logTs().checked       = !!s.log_timestamp;
+  $settings.autoResolved().textContent =
+    isAuto ? `(сейчас → ${effective})` : '';
+}
+
+async function loadSettings() {
+  $settings.status().textContent = '';
+  try {
+    const r = await api('/api/settings');
+    settingsToForm(r.settings, r.mixed_listen_effective, r.mixed_listen_auto);
+  } catch (e) {
+    $settings.status().textContent = 'не удалось загрузить: ' + e.message;
+    $settings.status().style.color = 'var(--err)';
+  }
+}
+
+async function saveSettings() {
+  const s = settingsFromForm();
+  $settings.busy().classList.remove('hidden');
+  $settings.status().textContent = '';
+  try {
+    const r = await api('/api/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(s),
+    });
+    settingsToForm(r.settings, r.mixed_listen_effective, r.mixed_listen_auto);
+    const msg = [];
+    msg.push('сохранено');
+    if (r.re_rendered) msg.push('config.json пересобран');
+    if (r.restarted)   msg.push('sing-box перезапущен');
+    if (r.restart_error) msg.push('предупреждение: ' + r.restart_error);
+    $settings.status().textContent = msg.join('; ');
+    $settings.status().style.color = r.restart_error ? 'var(--warn)' : 'var(--ok)';
+    // status pill may flip after restart
+    await refreshStatus();
+  } catch (e) {
+    $settings.status().textContent = 'ошибка: ' + e.message;
+    $settings.status().style.color = 'var(--err)';
+  } finally {
+    $settings.busy().classList.add('hidden');
+  }
+}
+
+$('btn-settings-save').addEventListener('click', saveSettings);
+$('btn-settings-reload').addEventListener('click', loadSettings);
+
 // initial + auto-refresh
 refreshStatus();
 setInterval(refreshStatus, 5000);
