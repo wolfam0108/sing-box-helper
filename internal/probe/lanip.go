@@ -31,14 +31,28 @@ func LANIP(iface string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	out, err := exec.CommandContext(ctx, "ip", "-4", "addr", "show", iface).Output()
+	bin := findIPBinary()
+	out, err := exec.CommandContext(ctx, bin, "-4", "addr", "show", iface).Output()
 	if err != nil {
-		return "", fmt.Errorf("lanip: exec ip: %w", err)
+		return "", fmt.Errorf("lanip: exec %s: %w", bin, err)
 	}
 	if ip := parseIPInetLine(out); ip != "" {
 		return ip, nil
 	}
 	return "", fmt.Errorf("lanip: no IPv4 address on %s", iface)
+}
+
+// findIPBinary picks an "ip" executable. On Entware/Keenetic the binary
+// lives at /opt/sbin/ip (busybox symlink) but /opt/sbin isn't in the
+// default PATH of background-launched processes, so a bare "ip" fails.
+// Trying explicit Entware paths first matches operator expectations.
+func findIPBinary() string {
+	for _, p := range []string{"/opt/sbin/ip", "/sbin/ip", "/usr/sbin/ip"} {
+		if _, err := exec.LookPath(p); err == nil {
+			return p
+		}
+	}
+	return "ip"
 }
 
 // parseIPInetLine scans `ip -4 addr show ...` output for the first
