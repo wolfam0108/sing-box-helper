@@ -1,0 +1,16 @@
+Package: singbox-helper
+Version: __PKGVER__
+Architecture: __PKGARCH__
+Maintainer: wolfam0108 <vova.iekimov@gmail.com>
+Section: net
+Priority: optional
+Homepage: https://github.com/wolfam0108/sing-box-helper
+License: MIT
+Source: https://github.com/wolfam0108/sing-box-helper
+Depends: sing-box
+Description: Web UI and CLI to manage sing-box on Keenetic/Entware.
+ Accepts a node URI (vless://, hysteria2://, socks5://, ...) and renders
+ the corresponding /opt/etc/sing-box/config.json. Provides a 4-tab web
+ interface on :8765 with status, settings, logs and backups. Does not
+ touch routing or iptables - keen-pbr and the netfilter hooks remain in
+ charge.

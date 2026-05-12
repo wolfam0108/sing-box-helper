@@ -1,0 +1,10 @@
+#!/bin/sh
+# Pre-remove hook: stop the daemon before opkg deletes the files.
+# Runtime data under /opt/etc/singbox-helper/ is intentionally NOT
+# wiped here - users get to keep their settings.yaml/state.json across
+# uninstalls. To clear them, the user removes the directory by hand.
+
+if [ -x /opt/etc/init.d/S98singbox-helper ]; then
+    /opt/etc/init.d/S98singbox-helper stop >/dev/null 2>&1 || true
+fi
+exit 0

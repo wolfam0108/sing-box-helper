@@ -25,6 +25,10 @@ import (
 	"github.com/wolfam0108/sing-box-helper/internal/web"
 )
 
+// Version is overridden at build time via -ldflags "-X main.Version=v1.0.0".
+// CI sets it from the git tag; a plain `go build` leaves it as "dev".
+var Version = "dev"
+
 func main() {
 	var (
 		serve        = flag.Bool("serve", false, "Run as HTTP server (otherwise process --from-uri and exit).")
@@ -35,6 +39,7 @@ func main() {
 			"Output path used together with --apply.")
 		settingsPath = flag.String("settings", "/opt/etc/singbox-helper/config.yaml",
 			"Path to YAML settings file. Missing file = built-in defaults.")
+		showVersion = flag.Bool("version", false, "Print version and exit.")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
@@ -46,6 +51,11 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *showVersion {
+		fmt.Println("singbox-helper", Version)
+		return
+	}
 
 	settings, err := config.LoadSettings(*settingsPath)
 	if err != nil {

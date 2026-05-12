@@ -1,0 +1,30 @@
+#!/bin/sh
+# Post-install hook for singbox-helper.
+#
+# Layout the runtime directory and start the daemon. Idempotent on
+# upgrades: the daemon is restarted, runtime state (config.yaml,
+# state.json) is preserved.
+
+set -e
+
+# Runtime directory for YAML settings and state.json.
+mkdir -p /opt/etc/singbox-helper
+chmod 0755 /opt/etc/singbox-helper
+
+# Make sure the binary and init script are executable. opkg should have
+# done this from the data tarball, but belt-and-braces.
+chmod 0755 /opt/bin/singbox-helper
+chmod 0755 /opt/etc/init.d/S98singbox-helper
+
+# Restart-or-start. Quiet on first install (no running process to stop).
+/opt/etc/init.d/S98singbox-helper restart >/dev/null 2>&1 || \
+  /opt/etc/init.d/S98singbox-helper start  >/dev/null 2>&1 || true
+
+cat <<'EOF'
+singbox-helper installed.
+  Web UI:  http://<router-LAN-IP>:8765
+  Service: /opt/etc/init.d/S98singbox-helper {start|stop|restart|check}
+  Config:  /opt/etc/singbox-helper/config.yaml  (created on first save)
+  State:   /opt/etc/singbox-helper/state.json   (created on first apply)
+EOF
+exit 0
