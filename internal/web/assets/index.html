@@ -211,10 +211,19 @@
 
 <!-- ============================ BACKUPS ============================ -->
 <div id="tab-backups" class="tab-pane hidden">
-  <section class="card">
-    <h2>Бэкапы</h2>
-    <p class="muted">Эта вкладка появится в следующем коммите (ε): список бэкапов, откат, удаление.</p>
-  </section>
+
+<section class="card">
+  <div class="card-head">
+    <h2>История конфигов</h2>
+    <button id="btn-backups-refresh" class="btn-link">Обновить</button>
+  </div>
+  <p class="muted">Бэкап создаётся автоматически перед каждым «Применить» и «Откатиться». Хранится не более <span id="backups-keep">10</span> штук.</p>
+  <div id="backups-status" class="muted" style="margin-bottom:8px"></div>
+  <ul id="backups-list" class="backups-list">
+    <li class="muted">— загрузка —</li>
+  </ul>
+</section>
+
 </div>
 
 </main>

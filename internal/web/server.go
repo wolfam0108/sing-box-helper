@@ -96,6 +96,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/test", s.handleTest)
 	mux.HandleFunc("/api/settings", s.handleSettings)
 	mux.HandleFunc("/api/logs", s.handleLogs)
+	mux.HandleFunc("/api/backups", s.handleBackups)
+	mux.HandleFunc("/api/backups/restore", s.handleBackupsRestore)
 
 	// Strip the "assets/" prefix so URLs look like /style.css, /app.js.
 	sub, err := fs.Sub(assetsFS, "assets")

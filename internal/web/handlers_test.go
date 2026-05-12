@@ -168,6 +168,138 @@ func TestStatus_ReadsFromConfigJSON(t *testing.T) {
 	}
 }
 
+// --- /api/backups --------------------------------------------------------
+
+func TestBackups_ListEmpty(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	req := httptest.NewRequest(http.MethodGet, "/api/backups", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var resp struct {
+		Backups []any `json:"backups"`
+		Keep    int   `json:"keep"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Backups) != 0 {
+		t.Errorf("expected empty list, got %d", len(resp.Backups))
+	}
+	if resp.Keep != 10 {
+		t.Errorf("keep = %d, want 10 (default)", resp.Keep)
+	}
+}
+
+func TestBackups_ListsExisting(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	// Two on-disk backups with parseable timestamps.
+	cfg := `{"outbounds":[{"type":"hysteria2","tag":"proxy","server":"h","server_port":443}]}`
+	_ = os.WriteFile(s.ConfigPath+".bak-20260510-100000", []byte(cfg), 0o644)
+	_ = os.WriteFile(s.ConfigPath+".bak-20260512-140000", []byte(cfg), 0o644)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/backups", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	var resp struct {
+		Backups []struct {
+			Name    string `json:"name"`
+			Summary string `json:"summary"`
+		} `json:"backups"`
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if len(resp.Backups) != 2 {
+		t.Fatalf("len = %d", len(resp.Backups))
+	}
+	// Newest first.
+	if !strings.Contains(resp.Backups[0].Name, "20260512") {
+		t.Errorf("newest-first failure: %+v", resp.Backups)
+	}
+	if !strings.Contains(resp.Backups[0].Summary, "hysteria2") {
+		t.Errorf("summary parsed wrong: %q", resp.Backups[0].Summary)
+	}
+}
+
+func TestBackups_DeleteRoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	bak := s.ConfigPath + ".bak-20260510-100000"
+	_ = os.WriteFile(bak, []byte("{}"), 0o644)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/backups?file="+bak, nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := os.Stat(bak); !os.IsNotExist(err) {
+		t.Errorf("file should be gone")
+	}
+}
+
+func TestBackups_DeleteForeignRejected(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	foreign := filepath.Join(t.TempDir(), "elsewhere.json.bak-20260510-100000")
+	_ = os.WriteFile(foreign, []byte("{}"), 0o644)
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/backups?file="+foreign, nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Errorf("status = %d, want 422", rec.Code)
+	}
+	if _, err := os.Stat(foreign); err != nil {
+		t.Errorf("foreign file must not be deleted: %v", err)
+	}
+}
+
+func TestBackups_Restore_PreSnapshotsCurrent(t *testing.T) {
+	tmp := t.TempDir()
+	s := newTestServer()
+	s.ConfigPath = filepath.Join(tmp, "config.json")
+	s.InitScript = filepath.Join(tmp, "no-init") // restart will fail (soft)
+
+	// Live config + one older backup.
+	_ = os.WriteFile(s.ConfigPath,
+		[]byte(`{"outbounds":[{"type":"vless","tag":"proxy","server":"current","server_port":443}]}`),
+		0o644)
+	bak := s.ConfigPath + ".bak-20260510-100000"
+	_ = os.WriteFile(bak,
+		[]byte(`{"outbounds":[{"type":"hysteria2","tag":"proxy","server":"restored","server_port":2053}]}`),
+		0o644)
+
+	body, _ := json.Marshal(map[string]string{"file": bak})
+	req := httptest.NewRequest(http.MethodPost, "/api/backups/restore", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp restoreResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.BackupOfPrevious == "" {
+		t.Errorf("expected a fresh pre-restore backup path, got empty")
+	}
+	// Live config should now contain "restored".
+	body2, _ := os.ReadFile(s.ConfigPath)
+	if !strings.Contains(string(body2), "restored") {
+		t.Errorf("live config not restored, got %s", body2)
+	}
+	// init script doesn't exist → restart_error filled, not a 5xx.
+	if resp.Restarted {
+		t.Errorf("restart should have failed gracefully (no init script)")
+	}
+}
+
 // --- /api/logs -----------------------------------------------------------
 
 func TestLogs_Helper_ReturnsRingBuffer(t *testing.T) {

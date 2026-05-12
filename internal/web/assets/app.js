@@ -344,6 +344,7 @@ function activateTab(name) {
   if (name === 'settings') loadSettings();
   if (name === 'logs')     loadLogs();
   else                     setLogsAutoRefresh(false);
+  if (name === 'backups')  loadBackups();
 }
 
 for (const t of tabs) {
@@ -511,6 +512,110 @@ $('btn-logs-refresh').addEventListener('click', loadLogs);
 $('logs-source').addEventListener('change', loadLogs);
 $('logs-lines').addEventListener('change', loadLogs);
 $('logs-autorefresh').addEventListener('change', (e) => setLogsAutoRefresh(e.target.checked));
+
+// --- backups -----------------------------------------------------------
+
+function fmtBackupTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function setBackupsStatus(msg, kind) {
+  const el = $('backups-status');
+  el.textContent = msg || '';
+  el.style.color = kind === 'err' ? 'var(--err)'
+                 : kind === 'ok'  ? 'var(--ok)'
+                 :                  'var(--muted)';
+}
+
+async function loadBackups() {
+  const ul = $('backups-list');
+  ul.innerHTML = '<li class="muted">— загрузка —</li>';
+  try {
+    const r = await api('/api/backups');
+    $('backups-keep').textContent = r.keep || 10;
+    ul.innerHTML = '';
+    if (!r.backups || r.backups.length === 0) {
+      ul.innerHTML = '<li class="muted">— бэкапов нет —</li>';
+      return;
+    }
+    for (const b of r.backups) ul.appendChild(renderBackupRow(b));
+  } catch (e) {
+    ul.innerHTML = '';
+    setBackupsStatus('ошибка загрузки: ' + e.message, 'err');
+  }
+}
+
+function renderBackupRow(b) {
+  const li = document.createElement('li');
+  li.className = 'backup-row';
+
+  const info = document.createElement('div');
+  info.className = 'info';
+  const when = document.createElement('div');
+  when.className = 'when';
+  when.textContent = fmtBackupTime(b.created_at);
+  info.appendChild(when);
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  meta.textContent = `${b.summary || '(не удалось распознать)'} · ${b.size} байт · ${b.name}`;
+  info.appendChild(meta);
+  li.appendChild(info);
+
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+
+  const btnRestore = document.createElement('button');
+  btnRestore.textContent = 'Откатиться';
+  btnRestore.className = 'primary';
+  btnRestore.addEventListener('click', () => restoreBackup(b.file));
+  actions.appendChild(btnRestore);
+
+  const btnDelete = document.createElement('button');
+  btnDelete.textContent = '×';
+  btnDelete.title = 'Удалить';
+  btnDelete.addEventListener('click', () => deleteBackup(b.file));
+  actions.appendChild(btnDelete);
+
+  li.appendChild(actions);
+  return li;
+}
+
+async function restoreBackup(file) {
+  if (!confirm('Откатить config.json к этому бэкапу? Текущий конфиг будет сохранён как новый бэкап.')) return;
+  setBackupsStatus('откатываем…', '');
+  try {
+    const r = await api('/api/backups/restore', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file }),
+    });
+    const parts = ['восстановлено'];
+    if (r.backup_of_previous) parts.push('предыдущий сохранён как ' + r.backup_of_previous.split(/[\\\/]/).pop());
+    if (r.restarted)          parts.push('sing-box перезапущен');
+    if (r.restart_error)      parts.push('предупреждение: ' + r.restart_error);
+    setBackupsStatus(parts.join('; '), r.restart_error ? 'err' : 'ok');
+    await loadBackups();
+    await refreshStatus();
+  } catch (e) {
+    setBackupsStatus('ошибка: ' + e.message, 'err');
+  }
+}
+
+async function deleteBackup(file) {
+  if (!confirm('Удалить этот бэкап навсегда?')) return;
+  try {
+    await api('/api/backups?file=' + encodeURIComponent(file), { method: 'DELETE' });
+    setBackupsStatus('удалено', 'ok');
+    await loadBackups();
+  } catch (e) {
+    setBackupsStatus('ошибка: ' + e.message, 'err');
+  }
+}
+
+$('btn-backups-refresh').addEventListener('click', loadBackups);
 
 // initial + auto-refresh
 refreshStatus();

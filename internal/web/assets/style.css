@@ -296,6 +296,31 @@ table.form-kv select:focus {
   outline-offset: -1px;
 }
 
+/* backups tab */
+ul.backups-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.backup-row {
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.backup-row .info { flex: 1; min-width: 0; }
+.backup-row .info .when { font-weight: 600; }
+.backup-row .info .meta { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.backup-row .actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.backup-row.danger { border-color: var(--err); }
+
 /* logs tab */
 .logs-controls {
   display: flex;

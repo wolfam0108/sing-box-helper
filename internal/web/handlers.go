@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"os/exec"
@@ -13,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wolfam0108/sing-box-helper/internal/backup"
 	"github.com/wolfam0108/sing-box-helper/internal/config"
 	"github.com/wolfam0108/sing-box-helper/internal/parser"
 	"github.com/wolfam0108/sing-box-helper/internal/probe"
@@ -205,7 +205,8 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bak, err := backupIfExists(s.ConfigPath)
+	bm := backup.New(s.ConfigPath)
+	bak, err := bm.Create()
 	if err != nil {
 		errorResp(w, http.StatusInternalServerError, "backup: "+err.Error())
 		return
@@ -241,6 +242,14 @@ func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
 	// config — we just surface it as a soft error.
 	if err := s.saveStateToDisk(req.URI, pn.Label, time.Now().UTC()); err != nil {
 		resp.RestartErr = strings.TrimSpace(resp.RestartErr + " | state save: " + err.Error())
+	}
+
+	// Trim old backups so the directory doesn't accumulate forever.
+	// Soft failure: report but don't block.
+	if s.KeepBackups > 0 {
+		if _, terr := bm.Trim(s.KeepBackups); terr != nil {
+			resp.RestartErr = strings.TrimSpace(resp.RestartErr + " | trim: " + terr.Error())
+		}
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -405,7 +414,7 @@ func (s *Server) handleSettingsPost(w http.ResponseWriter, r *http.Request) {
 		if pn, err := parser.Parse(st.URI); err == nil {
 			rendered, rerr := config.Render(pn, newS)
 			if rerr == nil {
-				if _, bakErr := backupIfExists(s.ConfigPath); bakErr == nil {
+				if _, bakErr := backup.New(s.ConfigPath).Create(); bakErr == nil {
 					if werr := os.WriteFile(s.ConfigPath, rendered, 0o644); werr == nil {
 						resp.ReRendered = true
 						if rsErr := restartSingBox(s.InitScript); rsErr != nil {
@@ -536,32 +545,87 @@ func readSingBoxLog(n int) ([]string, string, error) {
 }
 
 // =====================================================================
-// helpers
+// /api/backups
+//   GET                    -> list
+//   POST   /restore        -> body {"file":"..."} -> restore that backup
+//   DELETE ?file=...       -> delete that backup
 // =====================================================================
 
-// backupIfExists copies cfgPath into cfgPath.bak-<timestamp>, returning
-// the backup path. No-op if cfgPath doesn't exist.
-func backupIfExists(cfgPath string) (string, error) {
-	src, err := os.Open(cfgPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return "", nil
-		}
-		return "", err
-	}
-	defer src.Close()
-
-	bak := cfgPath + ".bak-" + time.Now().Format("20060102-150405")
-	dst, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
-	if err != nil {
-		return "", err
-	}
-	defer dst.Close()
-	if _, err := io.Copy(dst, src); err != nil {
-		return "", err
-	}
-	return bak, nil
+type backupsResponse struct {
+	Backups []backup.Entry `json:"backups"`
+	Keep    int            `json:"keep"`
 }
+
+type restoreRequest struct {
+	File string `json:"file"`
+}
+
+type restoreResponse struct {
+	Restored          string `json:"restored"`
+	BackupOfPrevious  string `json:"backup_of_previous,omitempty"`
+	Restarted         bool   `json:"restarted"`
+	RestartErr        string `json:"restart_error,omitempty"`
+}
+
+// handleBackups multiplexes GET / DELETE on /api/backups.
+func (s *Server) handleBackups(w http.ResponseWriter, r *http.Request) {
+	bm := backup.New(s.ConfigPath)
+	switch r.Method {
+	case http.MethodGet:
+		list, err := bm.List()
+		if err != nil {
+			errorResp(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, backupsResponse{Backups: list, Keep: s.KeepBackups})
+	case http.MethodDelete:
+		file := r.URL.Query().Get("file")
+		if file == "" {
+			errorResp(w, http.StatusBadRequest, "missing ?file= query")
+			return
+		}
+		if err := bm.Delete(file); err != nil {
+			errorResp(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"deleted": file})
+	default:
+		errorResp(w, http.StatusMethodNotAllowed, "GET or DELETE only")
+	}
+}
+
+func (s *Server) handleBackupsRestore(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errorResp(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var req restoreRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	if req.File == "" {
+		errorResp(w, http.StatusBadRequest, "missing 'file' in body")
+		return
+	}
+	bm := backup.New(s.ConfigPath)
+	prev, err := bm.Restore(req.File)
+	if err != nil {
+		errorResp(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	resp := restoreResponse{Restored: req.File, BackupOfPrevious: prev}
+	if rsErr := restartSingBox(s.InitScript); rsErr != nil {
+		resp.RestartErr = rsErr.Error()
+	} else {
+		resp.Restarted = true
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// =====================================================================
+// helpers
+// =====================================================================
 
 // restartSingBox runs `<initScript> restart`. Errors include stderr text
 // so the client gets a useful message instead of "exit status 1".
