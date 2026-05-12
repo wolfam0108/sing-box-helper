@@ -1,0 +1,329 @@
+package web
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/wolfam0108/sing-box-helper/internal/config"
+	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfam0108/sing-box-helper/internal/probe"
+)
+
+const (
+	reachTimeout  = 3 * time.Second
+	tunnelTimeout = 8 * time.Second
+	directTimeout = 5 * time.Second
+)
+
+// errorResp writes {"error": msg} with the given HTTP status code.
+func errorResp(w http.ResponseWriter, status int, msg string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": msg})
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
+}
+
+// =====================================================================
+// GET /api/status
+// =====================================================================
+
+type statusResponse struct {
+	probe.Status
+	CurrentNode *currentNodeInfo `json:"current_node,omitempty"`
+}
+
+type currentNodeInfo struct {
+	Protocol string `json:"protocol"`
+	Server   string `json:"server"`
+	Port     int    `json:"port"`
+}
+
+func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		errorResp(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	resp := statusResponse{
+		Status: probe.CollectStatus(s.Settings.TunInterfaceName),
+	}
+	if n := s.getLastApplied(); n != nil {
+		resp.CurrentNode = &currentNodeInfo{
+			Protocol: n.Display.Protocol,
+			Server:   n.Outbound.Server,
+			Port:     n.Outbound.ServerPort,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// =====================================================================
+// POST /api/preview     body: {"uri": "..."}
+// Returns parsed display + the rendered config.json as a string, WITHOUT
+// touching the filesystem or sing-box.
+// =====================================================================
+
+type uriRequest struct {
+	URI string `json:"uri"`
+}
+
+type previewResponse struct {
+	Display parser.Display `json:"display"`
+	Label   string         `json:"label,omitempty"`
+	Config  string         `json:"config"`
+}
+
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errorResp(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var req uriRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	pn, err := parser.Parse(req.URI)
+	if err != nil {
+		errorResp(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+	raw, err := config.Render(pn, s.Settings)
+	if err != nil {
+		errorResp(w, http.StatusInternalServerError, "render: "+err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, previewResponse{
+		Display: pn.Display,
+		Label:   pn.Label,
+		Config:  string(raw),
+	})
+}
+
+// =====================================================================
+// POST /api/apply       body: {"uri": "..."}
+// Pre-checks reachability of the node, renders the config, backs up the
+// previous file, writes the new one, runs the init script restart.
+// Returns the parsed display + reach result + a flag whether sing-box
+// was actually restarted.
+// =====================================================================
+
+type applyResponse struct {
+	Display    parser.Display `json:"display"`
+	Label      string         `json:"label,omitempty"`
+	BackupPath string         `json:"backup_path,omitempty"`
+	ConfigSize int            `json:"config_size"`
+	Reach      *reachInfo     `json:"reach,omitempty"`
+	Restarted  bool           `json:"restarted"`
+	RestartErr string         `json:"restart_error,omitempty"`
+}
+
+type reachInfo struct {
+	Network string `json:"network"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (s *Server) handleApply(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		errorResp(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var req uriRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		errorResp(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	pn, err := parser.Parse(req.URI)
+	if err != nil {
+		errorResp(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	// Pre-apply reachability check. This is best-effort; failure surfaces
+	// in the response but doesn't block the apply (the user may know what
+	// they're doing — e.g. server reachable but DPI blocks our probe).
+	network := probe.ProtoNetwork(pn.Outbound.Type)
+	reach := &reachInfo{Network: network}
+	if err := probe.Reach(network, pn.Outbound.Server, pn.Outbound.ServerPort, reachTimeout); err != nil {
+		reach.OK = false
+		reach.Error = err.Error()
+	} else {
+		reach.OK = true
+	}
+
+	rendered, err := config.Render(pn, s.Settings)
+	if err != nil {
+		errorResp(w, http.StatusInternalServerError, "render: "+err.Error())
+		return
+	}
+
+	bak, err := backupIfExists(s.ConfigPath)
+	if err != nil {
+		errorResp(w, http.StatusInternalServerError, "backup: "+err.Error())
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.ConfigPath), 0o755); err != nil {
+		errorResp(w, http.StatusInternalServerError, "mkdir: "+err.Error())
+		return
+	}
+	if err := os.WriteFile(s.ConfigPath, rendered, 0o644); err != nil {
+		errorResp(w, http.StatusInternalServerError, "write: "+err.Error())
+		return
+	}
+
+	resp := applyResponse{
+		Display:    pn.Display,
+		Label:      pn.Label,
+		BackupPath: bak,
+		ConfigSize: len(rendered),
+		Reach:      reach,
+	}
+
+	if err := restartSingBox(s.InitScript); err != nil {
+		resp.Restarted = false
+		resp.RestartErr = err.Error()
+	} else {
+		resp.Restarted = true
+	}
+
+	s.setLastApplied(pn)
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// =====================================================================
+// GET /api/test
+// Runs the seven diagnostic checks from ТЗ section 7.1 against the
+// currently-applied node. Returns the result list even on partial failure.
+// =====================================================================
+
+type testStep struct {
+	Name   string `json:"name"`
+	Status string `json:"status"` // "ok" | "fail" | "skip"
+	Detail string `json:"detail,omitempty"`
+}
+
+type testResponse struct {
+	Steps []testStep `json:"steps"`
+}
+
+func (s *Server) handleTest(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		errorResp(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+
+	steps := []testStep{}
+	add := func(name, status, detail string) {
+		steps = append(steps, testStep{Name: name, Status: status, Detail: detail})
+	}
+
+	// 1. Reachability of the current node
+	if n := s.getLastApplied(); n != nil {
+		network := probe.ProtoNetwork(n.Outbound.Type)
+		t0 := time.Now()
+		err := probe.Reach(network, n.Outbound.Server, n.Outbound.ServerPort, reachTimeout)
+		switch {
+		case err != nil:
+			add("Доступность узла", "fail", err.Error())
+		default:
+			add("Доступность узла", "ok",
+				fmt.Sprintf("%s %s:%d, %d ms",
+					strings.ToUpper(network), n.Outbound.Server, n.Outbound.ServerPort,
+					time.Since(t0).Milliseconds()))
+		}
+	} else {
+		add("Доступность узла", "skip", "Нет ранее применённого URI")
+	}
+
+	// 2. sing-box процесс
+	st := probe.CollectStatus(s.Settings.TunInterfaceName)
+	if st.SingBoxRunning {
+		add("sing-box процесс", "ok", fmt.Sprintf("PID %d %s", st.SingBoxPID, st.SingBoxVersion))
+	} else {
+		add("sing-box процесс", "fail", "процесс не найден")
+	}
+
+	// 3. TUN-интерфейс
+	if st.TunUp {
+		add("Интерфейс "+st.TunName, "ok", "UP")
+	} else {
+		add("Интерфейс "+st.TunName, "fail", "не UP или отсутствует")
+	}
+
+	// 4. Прямой IP (через WAN)
+	directIP, err := probe.DirectIP(directTimeout)
+	if err != nil {
+		add("Прямой IP", "fail", err.Error())
+	} else {
+		add("Прямой IP", "ok", directIP)
+	}
+
+	// 5. IP через TUN
+	tunIP, err := probe.TunnelIP(s.Settings.TunInterfaceName, tunnelTimeout)
+	switch {
+	case err != nil:
+		add("IP через TUN", "fail", err.Error())
+	case tunIP == directIP:
+		add("IP через TUN", "fail", "совпадает с прямым ("+tunIP+") — туннель не работает")
+	default:
+		add("IP через TUN", "ok", tunIP)
+	}
+
+	writeJSON(w, http.StatusOK, testResponse{Steps: steps})
+}
+
+// =====================================================================
+// helpers
+// =====================================================================
+
+// backupIfExists copies cfgPath into cfgPath.bak-<timestamp>, returning
+// the backup path. No-op if cfgPath doesn't exist.
+func backupIfExists(cfgPath string) (string, error) {
+	src, err := os.Open(cfgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	defer src.Close()
+
+	bak := cfgPath + ".bak-" + time.Now().Format("20060102-150405")
+	dst, err := os.OpenFile(bak, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return "", err
+	}
+	defer dst.Close()
+	if _, err := io.Copy(dst, src); err != nil {
+		return "", err
+	}
+	return bak, nil
+}
+
+// restartSingBox runs `<initScript> restart`. Errors include stderr text
+// so the client gets a useful message instead of "exit status 1".
+func restartSingBox(initScript string) error {
+	if _, err := os.Stat(initScript); err != nil {
+		return fmt.Errorf("init script not found at %s: %w", initScript, err)
+	}
+	cmd := exec.Command(initScript, "restart")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s restart: %w (%s)", initScript, err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}

@@ -73,13 +73,13 @@ type ParsedNode struct {
 
 // Display is what the web UI renders in the "Распознанные параметры" panel.
 type Display struct {
-	Protocol  string
-	Server    string
-	Port      int
-	SNI       string
-	TLSVerify bool
-	Transport string
+	Protocol  string `json:"protocol"`
+	Server    string `json:"server"`
+	Port      int    `json:"port"`
+	SNI       string `json:"sni,omitempty"`
+	TLSVerify bool   `json:"tls_verify"`
+	Transport string `json:"transport"`
 
 	// Notes carries optional warnings ("experimental xhttp support", etc.).
-	Notes []string
+	Notes []string `json:"notes,omitempty"`
 }

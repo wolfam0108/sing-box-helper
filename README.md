@@ -2,7 +2,7 @@
 
 Утилита для управления sing-box на роутерах Keenetic / Entware через простой веб-интерфейс.
 
-**Статус: ранний этап разработки (v0.5: парсер + рендер config.json + CLI).**
+**Статус: ранний этап разработки (v1.0-α: парсер + рендер + CLI + HTTP API без UI).**
 
 ## Что это
 
@@ -24,7 +24,9 @@
 | MVP-3 | Парсер `vless://` + REALITY (с uTLS fp и Vision flow) | ✅ |
 | MVP-4 | Парсер `vless://` + REALITY + xhttp (маппинг в httpupgrade) | ✅ |
 | v0.5 | Рендер полного `config.json` + CLI-команда `--from-uri` | ✅ |
-| v1.0 | HTTP-сервер + веб-UI + `.ipk`-пакет для Keenetic | ⏳ |
+| v1.0-α | HTTP API (`/api/status`, `/api/preview`, `/api/apply`, `/api/test`) без UI | ✅ |
+| v1.0-β | Веб-UI (HTML/CSS/JS, embed-ассеты) | ⏳ |
+| v1.0-γ | `.ipk`-пакет для Keenetic + GitHub Actions matrix-build | ⏳ |
 
 ## Запуск CLI
 
@@ -37,9 +39,32 @@ go run ./cmd/singbox-helper \
   --from-uri 'vless://uuid@host:443?type=tcp&security=reality&pbk=...&fp=chrome&sni=ya.ru' \
   --apply
 
-# Кросс-сборка под Keenetic (mipsle, softfloat) — около 2.7 МБ
+# Кросс-сборка под Keenetic (mipsle, softfloat) — около 7.2 МБ
 GOOS=linux GOARCH=mipsle GOMIPS=softfloat \
   go build -trimpath -ldflags='-s -w' -o singbox-helper-mipsle ./cmd/singbox-helper
+```
+
+## Запуск HTTP API (v1.0-α)
+
+```bash
+go run ./cmd/singbox-helper --serve --listen 0.0.0.0:8765
+```
+
+Доступные эндпоинты:
+
+| Метод | Путь | Тело | Что делает |
+|---|---|---|---|
+| GET  | `/api/status` | — | состояние sing-box, TUN, текущий узел |
+| POST | `/api/preview` | `{"uri":"..."}` | парсит URI, возвращает `display` + готовый `config.json` (без записи на диск) |
+| POST | `/api/apply`   | `{"uri":"..."}` | пред-проверка доступности → бэкап → запись → restart sing-box |
+| GET  | `/api/test` | — | 5 диагностических шагов на последнем applied узле |
+
+Пример:
+
+```bash
+curl -sS -X POST -H 'Content-Type: application/json' \
+  -d '{"uri":"hysteria2://pw@host:443"}' \
+  http://192.168.1.1:8765/api/preview
 ```
 
 ## Запуск тестов

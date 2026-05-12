@@ -1,19 +1,15 @@
-// Command singbox-helper is the CLI entry point. v0.5 exposes a single
-// task: take a node URI, render a sing-box config.json, and either print
-// it to stdout or write it to disk (with backup).
+// Command singbox-helper is the entry point. It has two run modes:
 //
-// Examples:
-//
-//	# Just print the JSON, no side effects.
+//	# CLI: render a sing-box config from a URI, print or write to disk.
 //	singbox-helper --from-uri 'hysteria2://pw@host:443'
-//
-//	# Write to default location, backing up the previous file.
 //	singbox-helper --from-uri 'vless://...' --apply
-//
-//	# Custom output path.
 //	singbox-helper --from-uri 'vless://...' --apply --out /tmp/sing-box.json
 //
-// Web UI and HTTP API will arrive in v1.0.
+//	# HTTP server: expose REST API at the given address.
+//	singbox-helper --serve
+//	singbox-helper --serve --listen 0.0.0.0:8765
+//
+// Web UI (HTML) lands in v1.0-β; v1.0-α is JSON-only.
 package main
 
 import (
@@ -26,26 +22,39 @@ import (
 
 	"github.com/wolfam0108/sing-box-helper/internal/config"
 	"github.com/wolfam0108/sing-box-helper/internal/parser"
+	"github.com/wolfam0108/sing-box-helper/internal/web"
 )
 
 func main() {
 	var (
-		fromURI = flag.String("from-uri", "", "Node URI (vless://, hysteria2://, hy2://). Required.")
+		serve   = flag.Bool("serve", false, "Run as HTTP server (otherwise process --from-uri and exit).")
+		listen  = flag.String("listen", "0.0.0.0:8765", "HTTP listen address used with --serve.")
+		fromURI = flag.String("from-uri", "", "Node URI (vless://, hysteria2://, hy2://). Required in CLI mode.")
 		apply   = flag.Bool("apply", false, "Write the rendered config to disk (otherwise prints to stdout).")
 		outPath = flag.String("out", "/opt/etc/sing-box/config.json",
 			"Output path used together with --apply.")
 	)
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr,
-			"singbox-helper — generate sing-box config.json from a node URI\n\n"+
-				"Usage:\n  %s --from-uri <URI> [--apply [--out <path>]]\n\nFlags:\n",
-			filepath.Base(os.Args[0]))
+			"singbox-helper — manage sing-box config.json from a node URI\n\n"+
+				"Usage:\n"+
+				"  %s --from-uri <URI> [--apply [--out <path>]]    # one-shot CLI\n"+
+				"  %s --serve [--listen 0.0.0.0:8765]             # HTTP API\n\nFlags:\n",
+			filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
 		flag.PrintDefaults()
 	}
 	flag.Parse()
 
+	if *serve {
+		if err := runServer(*listen); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	if *fromURI == "" {
-		fmt.Fprintln(os.Stderr, "error: --from-uri is required")
+		fmt.Fprintln(os.Stderr, "error: --from-uri is required (or use --serve for HTTP API)")
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -54,6 +63,13 @@ func main() {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
+}
+
+func runServer(addr string) error {
+	srv := web.New(config.DefaultSettings())
+	fmt.Fprintln(os.Stderr, "singbox-helper HTTP API listening on", addr)
+	fmt.Fprintln(os.Stderr, "Endpoints: GET /api/status, POST /api/preview, POST /api/apply, GET /api/test")
+	return srv.ListenAndServe(addr)
 }
 
 func run(uri string, apply bool, outPath string) error {
