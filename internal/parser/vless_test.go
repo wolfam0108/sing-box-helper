@@ -211,20 +211,87 @@ func TestParseVLESS_RealityErrors(t *testing.T) {
 	}
 }
 
-func TestParseVLESS_RejectsXHTTP(t *testing.T) {
-	// User's real URI from docs (type=xhttp + security=reality). Either of the
-	// two triggers a rejection; transport check fires first.
+func TestParseVLESS_XHTTPReality(t *testing.T) {
+	// Real URI from docs/ТЗ — xhttp + REALITY. xhttp has no native sing-box
+	// equivalent in 1.13, so the parser maps it to httpupgrade and records
+	// a warning in Display.Notes.
 	const uri = "vless://6a99b2ec-0d60-4607-acaa-bf666f29a787@ae.mywolfram.ru:39435" +
 		"?type=xhttp&encryption=none&path=%2F&host=&mode=auto&security=reality" +
 		"&pbk=m1oonmPcmTO2kZLm0_vfN8D3YQ_8FrXkLOLYudI4tmA&fp=edge&sni=ya.ru" +
 		"&sid=f064aec4&spx=%2F#VLESS-XHTTP-test-user-01"
 
-	_, err := ParseVLESS(uri)
-	if err == nil {
-		t.Fatal("expected xhttp to be rejected in MVP-2")
+	pn, err := ParseVLESS(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "MVP-4") {
-		t.Errorf("error = %q; want it to mention MVP-4", err.Error())
+	o := pn.Outbound
+
+	if o.Server != "ae.mywolfram.ru" || o.ServerPort != 39435 {
+		t.Errorf("server = %s:%d", o.Server, o.ServerPort)
+	}
+	if o.Transport == nil {
+		t.Fatal("Transport is nil")
+	}
+	if o.Transport.Type != "httpupgrade" {
+		t.Errorf("Transport.Type = %q, want httpupgrade (mapped from xhttp)", o.Transport.Type)
+	}
+	if o.Transport.Path != "/" {
+		t.Errorf("Transport.Path = %q, want /", o.Transport.Path)
+	}
+	if o.Transport.Host != "" {
+		t.Errorf("Transport.Host = %q, want empty", o.Transport.Host)
+	}
+	if o.TLS == nil || o.TLS.Reality == nil {
+		t.Fatal("TLS.Reality is missing")
+	}
+	if o.TLS.Reality.PublicKey != "m1oonmPcmTO2kZLm0_vfN8D3YQ_8FrXkLOLYudI4tmA" {
+		t.Errorf("pbk = %q", o.TLS.Reality.PublicKey)
+	}
+	if o.TLS.Reality.ShortID != "f064aec4" {
+		t.Errorf("sid = %q", o.TLS.Reality.ShortID)
+	}
+	if o.TLS.UTLS == nil || o.TLS.UTLS.Fingerprint != "edge" {
+		t.Errorf("uTLS fingerprint = %+v", o.TLS.UTLS)
+	}
+	if o.TLS.ServerName != "ya.ru" {
+		t.Errorf("SNI = %q", o.TLS.ServerName)
+	}
+
+	if pn.Display.Transport != "xhttp" {
+		t.Errorf("Display.Transport = %q, want xhttp (original URI value preserved)", pn.Display.Transport)
+	}
+	if len(pn.Display.Notes) == 0 {
+		t.Fatal("Display.Notes empty, expected xhttp-mapping warning")
+	}
+	if !strings.Contains(pn.Display.Notes[0], "httpupgrade") {
+		t.Errorf("Notes[0] = %q; want it to mention httpupgrade", pn.Display.Notes[0])
+	}
+	if pn.Label != "VLESS-XHTTP-test-user-01" {
+		t.Errorf("Label = %q", pn.Label)
+	}
+}
+
+func TestParseVLESS_SplithttpReality(t *testing.T) {
+	// type=splithttp is an older spelling of the same transport; should
+	// behave identically to xhttp.
+	const uri = "vless://6a99b2ec-0d60-4607-acaa-bf666f29a787@host:443" +
+		"?type=splithttp&path=%2Fapi&security=reality&pbk=AAA&fp=chrome&sni=ex.com"
+
+	pn, err := ParseVLESS(uri)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if pn.Outbound.Transport == nil || pn.Outbound.Transport.Type != "httpupgrade" {
+		t.Errorf("Transport = %+v", pn.Outbound.Transport)
+	}
+	if pn.Outbound.Transport.Path != "/api" {
+		t.Errorf("Path = %q", pn.Outbound.Transport.Path)
+	}
+	if pn.Display.Transport != "splithttp" {
+		t.Errorf("Display.Transport = %q", pn.Display.Transport)
+	}
+	if len(pn.Display.Notes) == 0 {
+		t.Error("expected splithttp warning in Notes")
 	}
 }
 

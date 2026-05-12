@@ -21,11 +21,13 @@ var uuidRegex = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4
 //
 // Supported:
 //
-//	transports: tcp, ws, grpc, h2, httpupgrade
+//	transports: tcp, ws, grpc, h2, httpupgrade, xhttp (mapped to httpupgrade),
+//	            splithttp (mapped to httpupgrade)
 //	security:   none, tls, reality
 //
-// xhttp/splithttp (type=xhttp / type=splithttp) is intentionally rejected —
-// it belongs to MVP-4.
+// xhttp/splithttp from xray have no native equivalent in sing-box 1.13;
+// the closest stable transport is httpupgrade and we map to it. A
+// warning is recorded in Display.Notes so the UI can show it.
 func ParseVLESS(raw string) (*ParsedNode, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
@@ -113,6 +115,10 @@ func ParseVLESS(raw string) (*ParsedNode, error) {
 		display.SNI = out.TLS.ServerName
 		display.TLSVerify = !out.TLS.Insecure
 	}
+	if transportType == "xhttp" || transportType == "splithttp" {
+		display.Notes = append(display.Notes,
+			fmt.Sprintf("Транспорт %q отображён в sing-box httpupgrade — sing-box 1.13 не имеет нативного xhttp-транспорта. Проверьте подключение.", transportType))
+	}
 
 	return &ParsedNode{
 		Outbound: out,
@@ -142,11 +148,8 @@ func pickVLESSTransport(raw string) (string, error) {
 	if t == "" {
 		t = "tcp"
 	}
-	if t == "xhttp" || t == "splithttp" {
-		return "", fmt.Errorf("vless: transport %q is not yet supported (planned for MVP-4)", t)
-	}
 	switch t {
-	case "tcp", "ws", "grpc", "h2", "httpupgrade":
+	case "tcp", "ws", "grpc", "h2", "httpupgrade", "xhttp", "splithttp":
 		return t, nil
 	default:
 		return "", fmt.Errorf("vless: unsupported transport %q", t)
@@ -248,9 +251,16 @@ func buildVLESSReality(host string, q url.Values) (*TLSConfig, error) {
 
 // buildVLESSTransport builds a Transport block for non-tcp transports.
 // It is the caller's responsibility to not call this for type=tcp.
+//
+// xhttp and splithttp from xray are mapped to sing-box's httpupgrade — see
+// the package doc on ParseVLESS for the rationale.
 func buildVLESSTransport(transportType string, q url.Values) *Transport {
-	tr := &Transport{Type: transportType}
-	switch transportType {
+	singboxType := transportType
+	if singboxType == "xhttp" || singboxType == "splithttp" {
+		singboxType = "httpupgrade"
+	}
+	tr := &Transport{Type: singboxType}
+	switch singboxType {
 	case "ws", "h2", "httpupgrade":
 		tr.Host = strings.TrimSpace(q.Get("host"))
 		tr.Path = strings.TrimSpace(q.Get("path"))
