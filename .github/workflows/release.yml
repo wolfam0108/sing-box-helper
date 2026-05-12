@@ -121,3 +121,90 @@ jobs:
           files: release/*.ipk
           generate_release_notes: true
           fail_on_unmatched_files: true
+
+  publish-feed:
+    # Publish the opkg-compatible feed under gh-pages so users can
+    # `opkg update && opkg install singbox-helper`. We MERGE the
+    # current build's .ipk into whatever already exists in the
+    # gh-pages branch (so older versions remain installable), then
+    # regenerate Packages/Packages.gz over the FULL directory.
+    name: publish-feed
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: checkout or init gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config --global user.name  "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          REPO="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.git"
+          if git ls-remote --exit-code --heads "$REPO" gh-pages >/dev/null 2>&1; then
+            echo "gh-pages exists — cloning"
+            git clone --depth=1 --branch gh-pages "$REPO" feed
+          else
+            echo "gh-pages missing — initialising orphan"
+            mkdir feed
+            cd feed
+            git init -b gh-pages
+            git remote add origin "$REPO"
+          fi
+
+      - name: download all .ipk artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: install opkg-utils
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq opkg-utils
+
+      - name: merge .ipk into feed and regenerate Packages
+        run: |
+          cd feed
+          for arch_dir in ../artifacts/ipk-*; do
+            arch=$(basename "$arch_dir" | sed 's/^ipk-//')
+            mkdir -p "$arch"
+            cp -v "$arch_dir"/*.ipk "$arch/"
+            # opkg-make-index walks the directory and prints to stdout
+            # a Packages index describing every .ipk it finds — both
+            # the brand new ones and the previously-published ones we
+            # checked out above.
+            (cd "$arch" && opkg-make-index . > Packages && gzip -9kf Packages)
+            ls -lh "$arch/"
+          done
+          touch .nojekyll
+          cat > index.html <<'HTML'
+          <!doctype html>
+          <html lang="en"><head><meta charset="utf-8">
+          <title>singbox-helper opkg feed</title>
+          <style>body{font-family:sans-serif;max-width:720px;margin:2em auto;padding:0 1em}
+          code,pre{background:#f3f4f6;padding:.2em .4em;border-radius:3px}
+          pre{padding:.8em 1em;overflow-x:auto}</style>
+          </head><body>
+          <h1>singbox-helper opkg feed</h1>
+          <p>Add the line for your architecture to <code>/opt/etc/opkg.conf</code> on the router, then:</p>
+          <pre>opkg update
+          opkg install singbox-helper</pre>
+          <h2>Supported architectures</h2>
+          <ul>
+            <li><a href="mipsel-3.4/">mipsel-3.4</a> — Keenetic / Xiaomi on MT7621 / MT7620 (most common)
+              <pre>src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/mipsel-3.4</pre></li>
+            <li><a href="aarch64-3.10/">aarch64-3.10</a> — new Keenetic Hopper / Hero / Giga (ARM64)
+              <pre>src/gz singbox-helper https://wolfam0108.github.io/sing-box-helper/aarch64-3.10</pre></li>
+          </ul>
+          <p><a href="https://github.com/wolfam0108/sing-box-helper">Source on GitHub</a></p>
+          </body></html>
+          HTML
+
+      - name: commit + push gh-pages
+        run: |
+          cd feed
+          git add -A
+          if git diff --cached --quiet; then
+            echo "no changes to publish"
+            exit 0
+          fi
+          git commit -m "publish ${{ github.ref_name }}"
+          git push origin gh-pages
