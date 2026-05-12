@@ -76,9 +76,31 @@ func main() {
 func runServer(addr, settingsPath string, s config.Settings) error {
 	srv := web.New(s)
 	srv.SettingsPath = settingsPath
+
+	// Tee stderr into the ring buffer that /api/logs?source=helper exposes,
+	// so the Logs tab shows the same lines the operator sees when running
+	// the helper interactively (or in init.d redirected output).
+	origStderr := os.Stderr
+	if pr, pw, err := os.Pipe(); err == nil {
+		os.Stderr = pw
+		go func() {
+			buf := make([]byte, 4096)
+			for {
+				n, rerr := pr.Read(buf)
+				if n > 0 {
+					_, _ = origStderr.Write(buf[:n])
+					_, _ = srv.Logs.Write(buf[:n])
+				}
+				if rerr != nil {
+					return
+				}
+			}
+		}()
+	}
+
 	fmt.Fprintln(os.Stderr, "singbox-helper HTTP API listening on", addr)
 	fmt.Fprintln(os.Stderr, "Settings:", settingsPath)
-	fmt.Fprintln(os.Stderr, "Endpoints: GET /api/status, POST /api/preview, POST /api/apply, GET /api/test, GET|POST /api/settings")
+	fmt.Fprintln(os.Stderr, "Endpoints: GET /api/status, POST /api/preview, POST /api/apply, GET /api/test, GET|POST /api/settings, GET /api/logs")
 	return srv.ListenAndServe(addr)
 }
 

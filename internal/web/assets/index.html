@@ -178,10 +178,35 @@
 
 <!-- ============================== LOGS ============================== -->
 <div id="tab-logs" class="tab-pane hidden">
-  <section class="card">
+
+<section class="card">
+  <div class="card-head">
     <h2>Логи</h2>
-    <p class="muted">Эта вкладка появится в следующем коммите (δ): источники <code>sing-box</code> и <code>helper</code>, автообновление.</p>
-  </section>
+    <button id="btn-logs-refresh" class="btn-link">Обновить</button>
+  </div>
+  <div class="logs-controls">
+    <label>
+      Источник:
+      <select id="logs-source">
+        <option value="singbox">sing-box (ndmc show log)</option>
+        <option value="helper">singbox-helper (этот процесс)</option>
+      </select>
+    </label>
+    <label>
+      Строк:
+      <select id="logs-lines">
+        <option>100</option>
+        <option selected>200</option>
+        <option>500</option>
+        <option>1000</option>
+      </select>
+    </label>
+    <label><input type="checkbox" id="logs-autorefresh"> автообновление (3 сек)</label>
+  </div>
+  <div id="logs-note" class="note hidden"></div>
+  <pre id="logs-out" class="logs-out">— нет данных —</pre>
+</section>
+
 </div>
 
 <!-- ============================ BACKUPS ============================ -->

@@ -168,6 +168,58 @@ func TestStatus_ReadsFromConfigJSON(t *testing.T) {
 	}
 }
 
+// --- /api/logs -----------------------------------------------------------
+
+func TestLogs_Helper_ReturnsRingBuffer(t *testing.T) {
+	s := newTestServer()
+	// Push a couple of fake helper-log lines into the buffer.
+	_, _ = s.Logs.Write([]byte("hello\nworld\n"))
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?source=helper&lines=10", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp logsResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Source != "helper" {
+		t.Errorf("source = %q", resp.Source)
+	}
+	if len(resp.Lines) != 2 {
+		t.Fatalf("len(lines) = %d, want 2", len(resp.Lines))
+	}
+	if !strings.Contains(resp.Lines[0], "hello") || !strings.Contains(resp.Lines[1], "world") {
+		t.Errorf("lines = %+v", resp.Lines)
+	}
+}
+
+func TestLogs_SingBox_GracefulNoteWhenNdmcAbsent(t *testing.T) {
+	// On the dev machine ndmc isn't installed; the handler must return
+	// 200 with a note rather than 500.
+	s := newTestServer()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?source=singbox", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body=%s", rec.Code, rec.Body.String())
+	}
+	var resp logsResponse
+	_ = json.Unmarshal(rec.Body.Bytes(), &resp)
+	if resp.Note == "" {
+		t.Errorf("expected an explanatory note when ndmc absent, got %+v", resp)
+	}
+}
+
+func TestLogs_UnknownSource(t *testing.T) {
+	s := newTestServer()
+	req := httptest.NewRequest(http.MethodGet, "/api/logs?source=mystery", nil)
+	rec := httptest.NewRecorder()
+	s.Handler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
 // --- /api/settings -------------------------------------------------------
 
 func TestSettings_GetReturnsDefaults(t *testing.T) {

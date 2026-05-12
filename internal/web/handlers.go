@@ -1,6 +1,7 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -447,6 +449,90 @@ func validateSettings(s config.Settings) error {
 		return fmt.Errorf("upstream_dns must not be empty")
 	}
 	return nil
+}
+
+// =====================================================================
+// GET /api/logs?source=<singbox|helper>&lines=<N>
+//
+// "singbox" — exec `ndmc -c "show log once"` and keep lines mentioning
+// sing-box (logread is not present on Entware-on-Keenetic — see memory
+// reference_keenetic_entware_install / general Keenetic ndmc usage).
+// "helper"  — return the in-process ring buffer (the helper's own
+// stderr, captured via logbuf.Buffer in main.go).
+// =====================================================================
+
+type logsResponse struct {
+	Source string   `json:"source"`
+	Lines  []string `json:"lines"`
+	Note   string   `json:"note,omitempty"`
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		errorResp(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	src := r.URL.Query().Get("source")
+	if src == "" {
+		src = "singbox"
+	}
+	n := 200
+	if v := r.URL.Query().Get("lines"); v != "" {
+		if x, err := strconv.Atoi(v); err == nil && x > 0 && x <= 2000 {
+			n = x
+		}
+	}
+
+	switch src {
+	case "singbox":
+		lines, note, err := readSingBoxLog(n)
+		if err != nil {
+			writeJSON(w, http.StatusOK, logsResponse{Source: src, Note: err.Error()})
+			return
+		}
+		writeJSON(w, http.StatusOK, logsResponse{Source: src, Lines: lines, Note: note})
+	case "helper":
+		if s.Logs == nil {
+			writeJSON(w, http.StatusOK, logsResponse{Source: src, Note: "ring buffer not initialised"})
+			return
+		}
+		entries := s.Logs.Tail(n)
+		out := make([]string, len(entries))
+		for i, e := range entries {
+			out[i] = e.When.Format("15:04:05") + " " + e.Text
+		}
+		writeJSON(w, http.StatusOK, logsResponse{Source: src, Lines: out})
+	default:
+		errorResp(w, http.StatusBadRequest, "unknown source (expect: singbox, helper)")
+	}
+}
+
+// readSingBoxLog asks ndmc for the system log and keeps the last n lines
+// that mention sing-box (case-insensitive). On routers without ndmc
+// (development boxes) this returns a note explaining the situation; the
+// HTTP response is still 200 — the UI shows the note rather than an error.
+func readSingBoxLog(n int) ([]string, string, error) {
+	if _, err := exec.LookPath("ndmc"); err != nil {
+		return nil, "ndmc не найден в PATH (это не Keenetic). На дев-машине эта вкладка недоступна.", nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ndmc", "-c", "show log once")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, "", fmt.Errorf("ndmc show log: %w", err)
+	}
+	var matched []string
+	for _, line := range strings.Split(string(out), "\n") {
+		ll := strings.ToLower(line)
+		if strings.Contains(ll, "sing-box") || strings.Contains(ll, "singbox") {
+			matched = append(matched, line)
+		}
+	}
+	if len(matched) > n {
+		matched = matched[len(matched)-n:]
+	}
+	return matched, "", nil
 }
 
 // =====================================================================

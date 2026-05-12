@@ -342,6 +342,8 @@ function activateTab(name) {
   for (const t of tabs) t.classList.toggle('active', t.dataset.tab === name);
   for (const k of Object.keys(panes)) panes[k].classList.toggle('hidden', k !== name);
   if (name === 'settings') loadSettings();
+  if (name === 'logs')     loadLogs();
+  else                     setLogsAutoRefresh(false);
 }
 
 for (const t of tabs) {
@@ -469,6 +471,46 @@ async function saveSettings() {
 
 $('btn-settings-save').addEventListener('click', saveSettings);
 $('btn-settings-reload').addEventListener('click', loadSettings);
+
+// --- logs --------------------------------------------------------------
+
+let logsTimer = null;
+
+async function loadLogs() {
+  const source = $('logs-source').value;
+  const lines  = $('logs-lines').value;
+  const out    = $('logs-out');
+  const note   = $('logs-note');
+  try {
+    const r = await api(`/api/logs?source=${encodeURIComponent(source)}&lines=${encodeURIComponent(lines)}`);
+    if (r.note) {
+      note.textContent = '⚠ ' + r.note;
+      note.classList.remove('hidden');
+    } else {
+      note.classList.add('hidden');
+    }
+    if (!r.lines || r.lines.length === 0) {
+      out.textContent = '— нет строк —';
+    } else {
+      out.textContent = r.lines.join('\n');
+      // autoscroll to bottom for fresh tails
+      out.scrollTop = out.scrollHeight;
+    }
+  } catch (e) {
+    note.textContent = '⚠ ошибка: ' + e.message;
+    note.classList.remove('hidden');
+  }
+}
+
+function setLogsAutoRefresh(on) {
+  if (logsTimer) { clearInterval(logsTimer); logsTimer = null; }
+  if (on) logsTimer = setInterval(loadLogs, 3000);
+}
+
+$('btn-logs-refresh').addEventListener('click', loadLogs);
+$('logs-source').addEventListener('change', loadLogs);
+$('logs-lines').addEventListener('change', loadLogs);
+$('logs-autorefresh').addEventListener('change', (e) => setLogsAutoRefresh(e.target.checked));
 
 // initial + auto-refresh
 refreshStatus();

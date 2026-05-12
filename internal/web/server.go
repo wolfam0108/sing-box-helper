@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wolfam0108/sing-box-helper/internal/config"
+	"github.com/wolfam0108/sing-box-helper/internal/logbuf"
 	"github.com/wolfam0108/sing-box-helper/internal/state"
 )
 
@@ -25,12 +26,13 @@ import (
 type Server struct {
 	mu           sync.RWMutex
 	settings     config.Settings
-	ConfigPath   string // path to /opt/etc/sing-box/config.json
-	InitScript   string // path to /opt/etc/init.d/S99sing-box
-	BackupDir    string // optional separate dir for backups; if empty, beside ConfigPath
-	StatePath    string // path to state.json (URI + label + applied_at)
-	SettingsPath string // path to /opt/etc/singbox-helper/config.yaml
-	KeepBackups  int    // 0 = keep all
+	ConfigPath   string         // path to /opt/etc/sing-box/config.json
+	InitScript   string         // path to /opt/etc/init.d/S99sing-box
+	BackupDir    string         // optional separate dir for backups; if empty, beside ConfigPath
+	StatePath    string         // path to state.json (URI + label + applied_at)
+	SettingsPath string         // path to /opt/etc/singbox-helper/config.yaml
+	KeepBackups  int            // 0 = keep all
+	Logs         *logbuf.Buffer // helper-process log ring; nil → no /api/logs?source=helper
 }
 
 // New creates a Server with sensible defaults.
@@ -42,6 +44,7 @@ func New(s config.Settings) *Server {
 		StatePath:    "/opt/etc/singbox-helper/state.json",
 		SettingsPath: "/opt/etc/singbox-helper/config.yaml",
 		KeepBackups:  10,
+		Logs:         logbuf.New(500),
 	}
 }
 
@@ -92,6 +95,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/api/apply", s.handleApply)
 	mux.HandleFunc("/api/test", s.handleTest)
 	mux.HandleFunc("/api/settings", s.handleSettings)
+	mux.HandleFunc("/api/logs", s.handleLogs)
 
 	// Strip the "assets/" prefix so URLs look like /style.css, /app.js.
 	sub, err := fs.Sub(assetsFS, "assets")

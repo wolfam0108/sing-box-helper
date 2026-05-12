@@ -296,6 +296,27 @@ table.form-kv select:focus {
   outline-offset: -1px;
 }
 
+/* logs tab */
+.logs-controls {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 13px;
+}
+.logs-controls select {
+  font: inherit;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+pre.logs-out {
+  max-height: 60vh;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
 /* misc */
 .hidden { display: none !important; }
 .muted  { color: var(--muted); font-size: 12px; }
