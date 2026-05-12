@@ -1,0 +1,22 @@
+# Binaries
+/singbox-helper
+/singbox-helper.exe
+/bin/
+
+# Test / coverage
+*.test
+*.out
+coverage.txt
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+/dist/
+*.ipk
