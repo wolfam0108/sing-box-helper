@@ -1,0 +1,21 @@
+Package: singbox-helper
+Version: 1.0.0
+Architecture: mipsel-3.4
+Maintainer: wolfram0108 <vova.iekimov@gmail.com>
+Section: net
+Priority: optional
+Homepage: https://github.com/wolfram0108/sing-box-helper
+License: MIT
+Source: https://github.com/wolfram0108/sing-box-helper
+Depends: sing-box-go
+Description: Web UI and CLI to manage sing-box on Keenetic/Entware.
+ Accepts a node URI (vless://, hysteria2://, socks5://, ...) and renders
+ the corresponding /opt/etc/sing-box/config.json. Provides a 4-tab web
+ interface on :8765 with status, settings, logs and backups. Does not
+ touch routing or iptables - keen-pbr and the netfilter hooks remain in
+ charge.
+Filename: singbox-helper_1.0.0_mipsel-3.4.ipk
+Size: 2739848
+MD5Sum: 7b38ef2270026eaf9e1e1a5df978ed52
+SHA256sum: 7db630f0f3f725c9df336bbb0cb81452308d6ecc1e7a38f1f53dceb9374eb71f
+

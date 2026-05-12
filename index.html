@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<title>singbox-helper opkg feed</title>
+<style>body{font-family:sans-serif;max-width:720px;margin:2em auto;padding:0 1em}
+code,pre{background:#f3f4f6;padding:.2em .4em;border-radius:3px}
+pre{padding:.8em 1em;overflow-x:auto}</style>
+</head><body>
+<h1>singbox-helper opkg feed</h1>
+<p>Add the line for your architecture to <code>/opt/etc/opkg.conf</code> on the router, then:</p>
+<pre>opkg update
+opkg install singbox-helper</pre>
+<h2>Supported architectures</h2>
+<ul>
+  <li><a href="mipsel-3.4/">mipsel-3.4</a> — Keenetic / Xiaomi on MT7621 / MT7620 (most common)
+    <pre>src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/mipsel-3.4</pre></li>
+  <li><a href="aarch64-3.10/">aarch64-3.10</a> — new Keenetic Hopper / Hero / Giga (ARM64)
+    <pre>src/gz singbox-helper https://wolfram0108.github.io/sing-box-helper/aarch64-3.10</pre></li>
+</ul>
+<p><a href="https://github.com/wolfram0108/sing-box-helper">Source on GitHub</a></p>
+</body></html>
